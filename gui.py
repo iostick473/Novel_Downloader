@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-
+import os
 
 class NovelDownloaderApp:
     def __init__(self, root):
@@ -91,6 +91,9 @@ class NovelDownloaderApp:
         status_bar = ttk.Label(root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
+        # 创建菜单
+        self.create_menu()
+
         # 添加示例数据
         self.add_sample_data()
 
@@ -154,3 +157,43 @@ class NovelDownloaderApp:
             self.result_tree.insert("", "end", values=data)
 
         self.log("已加载示例数据，可以尝试搜索或直接下载")
+
+    def create_menu(self):
+        """创建菜单栏"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # 文件菜单
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="打开下载目录", command=self.open_download_dir)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.root.quit)
+        menubar.add_cascade(label="文件", menu=file_menu)
+
+        # 帮助菜单
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="关于", command=self.show_about)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+
+    def open_download_dir(self):
+        """打开下载目录"""
+        download_dir = "downloads"
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
+
+        try:
+            os.startfile(download_dir)  # Windows
+        except:
+            try:
+                # MacOS
+                os.system(f'open "{download_dir}"')
+            except:
+                try:
+                    # Linux
+                    os.system(f'xdg-open "{download_dir}"')
+                except:
+                    self.show_info("打开目录", f"下载目录: {os.path.abspath(download_dir)}")
+
+    def show_about(self):
+        """显示关于信息"""
+        messagebox.showinfo("关于小说下载器", "版本: 2.0\n使用requests实现搜索和下载功能")
