@@ -1,12 +1,13 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
+
 
 class NovelDownloaderApp:
     def __init__(self, root):
         self.root = root
-        root.title("小说下载器 v1.3")
-        root.geometry("700x500")
+        root.title("小说下载器 v2.0")
+        root.geometry("800x600")
         root.resizable(True, True)
 
         # 创建主框架
@@ -28,7 +29,7 @@ class NovelDownloaderApp:
             state="readonly"
         )
         self.source_combobox['values'] = ('起点中文网', '晋江文学城')
-        self.source_combobox.current(0)  # 默认选择起点中文网
+        self.source_combobox.current(0)
         self.source_combobox.pack(side=tk.LEFT)
 
         # 搜索区域
@@ -45,6 +46,10 @@ class NovelDownloaderApp:
 
         self.download_button = ttk.Button(search_frame, text="下载选中")
         self.download_button.grid(row=0, column=3, padx=5)
+
+        # 取消下载按钮
+        self.cancel_button = ttk.Button(search_frame, text="取消下载", state="disabled")
+        self.cancel_button.grid(row=0, column=4, padx=5)
 
         # 结果列表区域
         result_frame = ttk.LabelFrame(main_frame, text="搜索结果", padding=(10, 5))
@@ -78,11 +83,21 @@ class NovelDownloaderApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_tree.pack(fill=tk.BOTH, expand=True)
 
+        # 下载进度区域
+        progress_frame = ttk.LabelFrame(main_frame, text="下载进度", padding=(10, 5))
+        progress_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.progress_var = tk.StringVar(value="等待下载...")
+        ttk.Label(progress_frame, textvariable=self.progress_var).pack(anchor=tk.W)
+
+        self.progress = ttk.Progressbar(progress_frame, orient="horizontal", length=600, mode="determinate")
+        self.progress.pack(fill=tk.X, pady=5)
+
         # 日志区域
         log_frame = ttk.LabelFrame(main_frame, text="下载日志", padding=(10, 5))
         log_frame.pack(fill=tk.BOTH, padx=5, pady=5)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=6)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=8)
         self.log_text.pack(fill=tk.BOTH, expand=True)
         self.log_text.configure(state='disabled')
 
@@ -97,16 +112,46 @@ class NovelDownloaderApp:
         # 添加示例数据
         self.add_sample_data()
 
+    def create_menu(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="打开下载目录", command=self.open_download_dir)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.root.quit)
+        menubar.add_cascade(label="文件", menu=file_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="关于", command=self.show_about)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+
+    def open_download_dir(self):
+        download_dir = "downloads"
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
+
+        try:
+            os.startfile(download_dir)
+        except:
+            try:
+                os.system(f'open "{download_dir}"')
+            except:
+                try:
+                    os.system(f'xdg-open "{download_dir}"')
+                except:
+                    self.show_info("打开目录", f"下载目录: {os.path.abspath(download_dir)}")
+
+    def show_about(self):
+        messagebox.showinfo("关于小说下载器", "版本: 2.0\n使用多线程实现高效搜索和下载")
+
     def get_selected_item(self):
-        """获取选中的小说"""
         selected = self.result_tree.selection()
         if not selected:
             return None
         return self.result_tree.item(selected[0])
 
     def display_results(self, results):
-        """在结果列表中显示搜索结果"""
-        # 清空结果列表
         self.result_tree.delete(*self.result_tree.get_children())
 
         if not results:
@@ -122,30 +167,27 @@ class NovelDownloaderApp:
 
     def update_progress(self, novel_name, progress):
         """更新下载进度"""
-        self.log(f"下载中: {novel_name} [{progress}%]")
+        self.progress_var.set(f"下载中: {novel_name} [{progress}%]")
+        self.progress['value'] = progress
+        self.log(f"下载进度: {novel_name} [{progress}%]")
         self.set_status(f"下载中: {progress}%")
 
     def log(self, message):
-        """向日志区域添加消息"""
         self.log_text.configure(state='normal')
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.configure(state='disabled')
         self.log_text.yview(tk.END)
 
     def set_status(self, message):
-        """设置状态栏消息"""
         self.status_var.set(message)
 
     def show_warning(self, title, message):
-        """显示警告消息"""
         messagebox.showwarning(title, message)
 
     def show_info(self, title, message):
-        """显示信息消息"""
         messagebox.showinfo(title, message)
 
     def add_sample_data(self):
-        """添加一些示例数据到表格"""
         sample_data = [
             ("诡秘之主", "爱潜水的乌贼", "起点中文网", "已完结", "1434章"),
             ("斗破苍穹", "天蚕土豆", "起点中文网", "已完结", "1623章"),
@@ -157,43 +199,3 @@ class NovelDownloaderApp:
             self.result_tree.insert("", "end", values=data)
 
         self.log("已加载示例数据，可以尝试搜索或直接下载")
-
-    def create_menu(self):
-        """创建菜单栏"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
-        # 文件菜单
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="打开下载目录", command=self.open_download_dir)
-        file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
-        menubar.add_cascade(label="文件", menu=file_menu)
-
-        # 帮助菜单
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="关于", command=self.show_about)
-        menubar.add_cascade(label="帮助", menu=help_menu)
-
-    def open_download_dir(self):
-        """打开下载目录"""
-        download_dir = "downloads"
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-
-        try:
-            os.startfile(download_dir)  # Windows
-        except:
-            try:
-                # MacOS
-                os.system(f'open "{download_dir}"')
-            except:
-                try:
-                    # Linux
-                    os.system(f'xdg-open "{download_dir}"')
-                except:
-                    self.show_info("打开目录", f"下载目录: {os.path.abspath(download_dir)}")
-
-    def show_about(self):
-        """显示关于信息"""
-        messagebox.showinfo("关于小说下载器", "版本: 2.0\n使用requests实现搜索和下载功能")

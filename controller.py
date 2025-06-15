@@ -8,13 +8,13 @@ class Controller:
         self.gui = gui
         self.search_engine = SearchEngine()
         self.downloader = Downloader()
+        self.current_download = None  # 当前下载任务
 
         # 绑定GUI事件
         self.gui.search_button.config(command=self.start_search_thread)
         self.gui.download_button.config(command=self.download_selected)
 
     def start_search_thread(self):
-        """启动搜索线程"""
         novel_name = self.gui.novel_entry.get().strip()
         if not novel_name:
             self.gui.show_warning("输入错误", "请输入小说名称")
@@ -36,7 +36,6 @@ class Controller:
         search_thread.start()
 
     def search_novel(self, novel_name, source):
-        """搜索小说功能"""
         self.gui.log(f"开始在【{source}】搜索: {novel_name}")
 
         # 调用搜索引擎
@@ -49,7 +48,6 @@ class Controller:
         self.gui.search_button.config(state='normal')
 
     def download_selected(self):
-        """下载选中小说功能"""
         selected = self.gui.get_selected_item()
         if not selected:
             self.gui.show_info("提示", "请先选择要下载的小说")
@@ -59,24 +57,28 @@ class Controller:
         novel_name = values[0]
         source = values[2]
 
+        # 如果已有下载任务，先取消
+        if self.current_download and self.current_download.is_alive():
+            self.gui.log("已有下载任务进行中，等待完成...")
+            return
+
         self.gui.log(f"开始从【{source}】下载: {novel_name}")
         self.gui.set_status("准备下载...")
 
         # 启动下载线程
-        download_thread = threading.Thread(
+        self.current_download = threading.Thread(
             target=self.download_novel,
             args=(novel_name, source),
             daemon=True
         )
-        download_thread.start()
+        self.current_download.start()
 
     def download_novel(self, novel_name, source):
-        """下载小说功能"""
         # 调用下载器
         success = self.downloader.download(
             novel_name,
             source,
-            self.gui.update_progress
+            self.update_download_progress
         )
 
         if success:
@@ -87,3 +89,8 @@ class Controller:
             self.gui.log(f"下载失败: {novel_name}")
             self.gui.set_status("下载失败")
             self.gui.show_warning("下载失败", f"小说《{novel_name}》下载失败，请重试")
+
+    def update_download_progress(self, novel_name, progress):
+        """更新下载进度（由下载线程调用）"""
+        # 使用after方法确保线程安全地更新GUI
+        self.gui.root.after(0, self.gui.update_progress, novel_name, progress)
