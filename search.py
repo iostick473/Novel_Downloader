@@ -4,7 +4,7 @@ import random
 import time
 import re
 import json
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -31,6 +31,7 @@ class SearchEngine:
         except Exception as e:
             print(f"搜索出错: {e}")
             return self.mock_search(source, novel_name)
+
 
     def search_qidian(self, novel_name):
         """搜索起点中文网"""
@@ -65,25 +66,47 @@ class SearchEngine:
 
     def process_qidian_item(self, item):
         """处理单个起点书籍项（多线程调用）"""
+        book_id = '未知'
         title = '未知'
         author = '未知'
         status = '未知'
         chapter_num = '未知'
 
         try:
-            title = item.find('div', attrs={'class': 'book-mid-info'}).find('h3',attrs={'class': 'book-info-title'}).find('a').text
             author = item.find('div', attrs={'class': 'book-mid-info'}).find('p', attrs={'class': 'author'}).find('i').text
-            status = item.find('div', attrs={'class': 'book-mid-info'}).find('p', attrs={'class': 'author'}).find('span').text
-
         except:
             try:
                 author = item.find('div', attrs={'class': 'book-mid-info'}).find('a', attrs={'rel': 'nofollow'}).text
-                status = item.find('div', attrs={'class': 'book-mid-info'}).find('p',attrs={'class': 'author'}).find('span').text
-                chapter_url = 'https:' + item.find('div', attrs={'class': 'book-mid-info'}).find('h3', attrs={'class': 'book-info-title'}).find('a')['href']
-                chapter_num = self.get_qidian_chapter_count(chapter_url)
             except:
                 pass
-        return title, author, "起点中文网", status, f"{chapter_num}章"
+        try:
+            title = item.find('div', attrs={'class': 'book-mid-info'}).find('h3',attrs={'class': 'book-info-title'}).find('a').text
+            status = item.find('div', attrs={'class': 'book-mid-info'}).find('p', attrs={'class': 'author'}).find('span').text
+            book_url = 'https:' + item.find('div', attrs={'class': 'book-mid-info'}).find('h3', attrs={'class': 'book-info-title'}).find('a')['href']
+            book_id = self.extract_qidian_book_id(book_url)
+            chapter_num = self.get_qidian_chapter_count(book_url)
+        except:
+            pass
+
+        # 返回结果包含书籍ID
+        return {
+            "id": f"qidian_{book_id}",
+            "title": title,
+            "author": author,
+            "source": "起点中文网",
+            "status": status,
+            "chapters": f"{chapter_num}章"
+        }
+
+    def extract_qidian_book_id(self, book_url):
+        """从书籍URL中提取书籍ID"""
+        try:
+            # 示例URL: /info/1021617576
+            path = urlparse(book_url).path
+            book_id = path.split('/')[-2]
+            return book_id
+        except:
+            return "unknown"
 
     def get_qidian_chapter_count(self, chapter_url):
         """获取起点章节数量（多线程调用）"""
@@ -136,10 +159,32 @@ class SearchEngine:
             status = item.select_one('td:nth-child(3)').text.strip()
             chapter = item.select_one('td:nth-child(4)').text.strip()
 
-            return (title, author, "晋江文学城", status, chapter)
+            # 获取书籍ID
+            book_url = title_elem['href']
+            book_id = self.extract_jjwxc_book_id(book_url)
+
+            return {
+                "id": f"jjwxc_{book_id}",
+                "title": title,
+                "author": author,
+                "source": "晋江文学城",
+                "status": status,
+                "chapters": chapter
+            }
         except Exception as e:
             print(f"处理晋江书籍项出错: {e}")
             return None
+
+    def extract_jjwxc_book_id(self, book_url):
+        """从书籍URL中提取书籍ID"""
+        try:
+            # 示例URL: onebook.php?novelid=123456
+            parsed = urlparse(book_url)
+            # 解析查询参数获取novelid
+            params = dict(param.split('=') for param in parsed.query.split('&'))
+            return params.get('novelid', 'unknown')
+        except:
+            return "unknown"
 
     def mock_search(self, source, novel_name):
         """模拟搜索作为备选方案"""
@@ -151,13 +196,18 @@ class SearchEngine:
                 status = random.choice(["连载中", "已完结"])
                 chapters = random.randint(100, 1500)
                 author = random.choice(["唐家三少", "我吃西红柿", "辰东", "天蚕土豆", "爱潜水的乌贼"])
-                results.append((
-                    f"{novel_name}（起点版）{i}",
-                    author,
-                    "起点中文网",
-                    status,
-                    f"{chapters}章"
-                ))
+
+                # 生成模拟ID
+                book_id = f"qidian_mock_{random.randint(1000000, 9999999)}"
+
+                results.append({
+                    "id": book_id,
+                    "title": f"{novel_name}（起点版）{i}",
+                    "author": author,
+                    "source": "起点中文网",
+                    "status": status,
+                    "chapters": f"{chapters}章"
+                })
             return results
 
         elif source == "晋江文学城":
@@ -166,13 +216,18 @@ class SearchEngine:
                 status = random.choice(["连载中", "已完结"])
                 chapters = random.randint(30, 300)
                 author = random.choice(["Priest", "墨香铜臭", "淮上", "巫哲", "漫漫何其多"])
-                results.append((
-                    f"{novel_name}（晋江版）{i}",
-                    author,
-                    "晋江文学城",
-                    status,
-                    f"{chapters}章"
-                ))
+
+                # 生成模拟ID
+                book_id = f"jjwxc_mock_{random.randint(100000, 999999)}"
+
+                results.append({
+                    "id": book_id,
+                    "title": f"{novel_name}（晋江版）{i}",
+                    "author": author,
+                    "source": "晋江文学城",
+                    "status": status,
+                    "chapters": f"{chapters}章"
+                })
             return results
 
         return []
