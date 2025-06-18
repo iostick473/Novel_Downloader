@@ -6,6 +6,14 @@ from download import Downloader
 from database import NovelDatabase
 from reader import NovelReader
 
+import threading
+import os
+import tkinter as tk
+from search import SearchEngine
+from download import Downloader
+from database import NovelDatabase
+from reader import NovelReader
+
 
 class Controller:
     def __init__(self, gui):
@@ -14,6 +22,7 @@ class Controller:
         self.downloader = Downloader()
         self.current_download = None  # 当前下载任务
         self.db = NovelDatabase()  # 创建数据库实例
+        self.downloader.set_database(self.db)  # 设置数据库实例
 
         # 绑定GUI事件
         self.gui.search_button.config(command=self.start_search_thread)
@@ -21,6 +30,10 @@ class Controller:
 
         # 设置控制器引用到GUI
         self.gui.set_controller(self)
+
+    def _extract_novel_title(self, novel_id):
+        """提取小说标题的通用方法"""
+        return novel_id.split("_", 1)[1] if "_" in novel_id else novel_id
 
     def start_search_thread(self):
         novel_name = self.gui.novel_entry.get().strip()
@@ -66,11 +79,11 @@ class Controller:
         source = selected[3]  # 第四列是来源
 
         # 获取小说标题用于日志
-        novel_title = selected[1]
+        novel_title = self._extract_novel_title(novel_id)
 
         # 如果已有下载任务，先取消
         if self.current_download and self.current_download.is_alive():
-            self.gui.log("已有下载任务进行中，等待完成...")
+            self.gui.log("已有下载任务进行中，请等待完成...")
             return
 
         self.gui.log(f"开始从【{source}】下载: {novel_title} (ID: {novel_id})")
@@ -85,18 +98,15 @@ class Controller:
         self.current_download.start()
 
     def download_novel(self, novel_id, source):
+        # 提取小说标题
+        novel_title = self._extract_novel_title(novel_id)
+
         # 调用下载器
         success = self.downloader.download(
             novel_id,
             source,
             self.update_download_progress
         )
-
-        # 从ID中提取书名
-        if "_" in novel_id:
-            novel_title = novel_id.split("_", 1)[1]
-        else:
-            novel_title = novel_id
 
         if success:
             self.gui.log(f"下载完成: {novel_title} (ID: {novel_id})")
@@ -106,6 +116,11 @@ class Controller:
             self.gui.log(f"下载失败: {novel_title} (ID: {novel_id})")
             self.gui.set_status("下载失败")
             self.gui.show_warning("下载失败", f"小说《{novel_title}》下载失败，请重试")
+
+    def update_download_progress(self, novel_id, progress):
+        """更新下载进度（由下载线程调用）"""
+        # 使用after方法确保线程安全地更新GUI
+        self.gui.root.after(0, self.gui.update_progress, novel_id, progress)
 
     def update_download_progress(self, novel_id, progress):
         """更新下载进度（由下载线程调用）"""

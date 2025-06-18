@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from database import NovelDatabase
+import os
 
 
 class LibraryBrowser:
@@ -126,53 +127,40 @@ class LibraryBrowser:
             books = self.db.get_all_books()
 
         # 添加书籍到列表
-        def load_books(self):
-            # 清空现有书籍
-            for item in self.book_tree.get_children():
-                self.book_tree.delete(item)
+        for book in books:
+            # 获取下载记录
+            downloads = self.db.get_book_downloads(book['id'])
+            download_time = ""
+            if downloads:
+                download_time = downloads[0]['download_time']
+                if isinstance(download_time, str):
+                    download_time = download_time[:16]  # 截取日期和时间部分
 
-            # 获取当前选择的分类
-            selected_category = self.category_var.get()
-
-            if selected_category and selected_category != "全部":
-                books = self.db.get_books_in_category(selected_category)
-            else:
-                books = self.db.get_all_books()
-
-            # 添加书籍到列表
-            for book in books:
-                # 确保获取下载记录
-                downloads = self.db.get_book_downloads(book['id'])
-                download_time = ""
-                if downloads:
-                    download_time = downloads[0]['download_time']
-                    if isinstance(download_time, str):
-                        download_time = download_time[:16]  # 截取日期和时间部分
-
-                # 确保获取阅读进度
-                progress = self.db.get_reading_progress(book['id'])
-                progress_text = "未开始阅读"
-                if progress:
-                    current_chapter = progress.get('current_chapter', 1)
-                    total_chapters = book.get('chapters', "未知章节数")
-                    if isinstance(total_chapters, str) and "章" in total_chapters:
-                        try:
-                            total_chapters = int(total_chapters.split("章")[0])
-                        except:
-                            total_chapters = 1
+            # 获取阅读进度
+            progress = self.db.get_reading_progress(book['id'])
+            progress_text = "未开始阅读"
+            if progress:
+                current_chapter = progress.get('current_chapter', 1)
+                total_chapters = book.get('total_chapters', 0)
+                if total_chapters > 0:
                     progress_text = f"{current_chapter}/{total_chapters}章"
+                else:
+                    progress_text = f"第{current_chapter}章"
 
-                # 添加书籍到树状视图
-                self.book_tree.insert("", "end", values=(
-                    book['id'],
-                    book['title'],
-                    book['author'],
-                    book.get('source', '未知来源'),
-                    book.get('status', '未知状态'),
-                    book.get('chapters', '未知'),
-                    download_time,
-                    progress_text
-                ))
+                if progress.get('bookmarked'):
+                    progress_text += " 📖"
+
+            # 添加书籍到树状视图
+            self.book_tree.insert("", "end", values=(
+                book['id'],
+                book['title'],
+                book['author'],
+                book.get('source', '未知来源'),
+                book.get('status', '未知状态'),
+                book.get('chapters', '未知'),
+                download_time,
+                progress_text
+            ))
 
     def search_books(self, event=None):
         """搜索书籍"""

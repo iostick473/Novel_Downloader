@@ -1,14 +1,24 @@
 import sqlite3
 import os
 import json
+import time
 import hashlib
-import datetime
+from datetime import datetime
 import platform
 from pathlib import Path
+import threading
+import datetime as dt  # 添加别名避免冲突
 
 
 class NovelDatabase:
     def __init__(self, db_path=None):
+        # 添加线程锁
+        self.lock = threading.Lock()
+
+        # 确保应用数据目录存在
+        app_data_dir = self.get_app_data_dir()
+        app_data_dir.mkdir(parents=True, exist_ok=True)  # 确保目录存在
+
         # 如果提供了自定义路径，直接使用
         if db_path:
             # 确保目录存在
@@ -28,9 +38,13 @@ class NovelDatabase:
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    custom_db_path = config.get("database_path")
-                    if custom_db_path and os.path.isabs(custom_db_path):
-                        self.db_path = custom_db_path
+                    custom_db_folder = config.get("database_folder")
+                    if custom_db_folder and os.path.isabs(custom_db_folder):
+                        # 确保目录存在
+                        os.makedirs(custom_db_folder, exist_ok=True)
+                        # 数据库文件路径
+                        db_file_path = os.path.join(custom_db_folder, "novel_database.db")
+                        self.db_path = db_file_path
                         self.init_database()
                         return
             except Exception as e:
@@ -38,6 +52,8 @@ class NovelDatabase:
 
         # 使用默认数据库路径
         self.db_path = str(app_data_dir / "novel_database.db")
+        # 确保目录存在
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_database()
 
     def get_app_data_dir(self):
@@ -59,83 +75,89 @@ class NovelDatabase:
             os.makedirs(db_dir, exist_ok=True)
 
         """初始化数据库和表结构"""
-        with sqlite3.connect(self.db_path) as conn:
+        try:
+            # 使用connect创建数据库文件（如果不存在）
+            conn = sqlite3.connect(self.db_path)
+
+            # 启用WAL模式，提高并发性能
+            conn.execute("PRAGMA journal_mode=WAL;")
+
             cursor = conn.cursor()
 
             # 创建书籍信息表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS books (
-                    id TEXT PRIMARY KEY,
-                    source TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    author TEXT NOT NULL,
-                    status TEXT,
-                    chapters TEXT,
-                    last_search TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    search_count INTEGER DEFAULT 1,
-                    metadata TEXT,
-                    total_chapters INTEGER DEFAULT 0,  -- 新增：总章节数
-                    last_read_time TIMESTAMP           -- 新增：最后阅读时间
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS books (
+                     id TEXT PRIMARY KEY,
+                     source TEXT NOT NULL,
+                     title TEXT NOT NULL,
+                     author TEXT NOT NULL,
+                     status TEXT,
+                     chapters TEXT,
+                     last_search TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                     search_count INTEGER DEFAULT 1,
+                     metadata TEXT,
+                     total_chapters INTEGER DEFAULT 0,
+                     last_read_time TIMESTAMP
+                 )
+             ''')
 
             # 创建下载记录表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS downloads (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    book_id TEXT NOT NULL,
-                    download_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    file_path TEXT NOT NULL,
-                    file_size INTEGER,
-                    download_status TEXT,
-                    FOREIGN KEY (book_id) REFERENCES books(id)
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS downloads (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     book_id TEXT NOT NULL,
+                     download_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                     file_path TEXT NOT NULL,
+                     file_size INTEGER,
+                     download_status TEXT,
+                     FOREIGN KEY (book_id) REFERENCES books(id)
+                 )
+             ''')
 
-            # 创建阅读进度表 (新增)
+            # 创建阅读进度表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS reading_progress (
-                    book_id TEXT PRIMARY KEY,
-                    current_chapter INTEGER DEFAULT 1,  -- 当前阅读章节索引
-                    chapter_position INTEGER DEFAULT 0, -- 章节内阅读位置（行号或百分比）
-                    last_read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    bookmarked BOOLEAN DEFAULT 0,      -- 是否书签
-                    notes TEXT,                        -- 阅读笔记
-                    FOREIGN KEY (book_id) REFERENCES books(id)
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS reading_progress (
+                     book_id TEXT PRIMARY KEY,
+                     current_chapter INTEGER DEFAULT 1,
+                     chapter_position INTEGER DEFAULT 0,
+                     last_read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                     bookmarked BOOLEAN DEFAULT 0,
+                     notes TEXT,
+                     FOREIGN KEY (book_id) REFERENCES books(id)
+                 )
+             ''')
 
             # 创建分类表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS categories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    color TEXT
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS categories (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     name TEXT UNIQUE NOT NULL,
+                     color TEXT
+                 )
+             ''')
 
             # 创建书籍分类关系表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS book_categories (
-                    book_id TEXT NOT NULL,
-                    category_id INTEGER NOT NULL,
-                    PRIMARY KEY (book_id, category_id),
-                    FOREIGN KEY (book_id) REFERENCES books(id),
-                    FOREIGN KEY (category_id) REFERENCES categories(id)
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS book_categories (
+                     book_id TEXT NOT NULL,
+                     category_id INTEGER NOT NULL,
+                     PRIMARY KEY (book_id, category_id),
+                     FOREIGN KEY (book_id) REFERENCES books(id),
+                     FOREIGN KEY (category_id) REFERENCES categories(id)
+                 )
+             ''')
 
-            # 创建阅读历史表 (新增)
+            # 创建阅读历史表
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS reading_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    book_id TEXT NOT NULL,
-                    read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    duration INTEGER,  -- 阅读时长（秒）
-                    chapters_read INTEGER, -- 本次阅读的章节数
-                    FOREIGN KEY (book_id) REFERENCES books(id)
-                )
-            ''')
+                 CREATE TABLE IF NOT EXISTS reading_history (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     book_id TEXT NOT NULL,
+                     read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                     duration INTEGER,
+                     chapters_read INTEGER,
+                     FOREIGN KEY (book_id) REFERENCES books(id)
+                 )
+             ''')
 
             # 创建默认分类
             default_categories = [
@@ -144,13 +166,13 @@ class NovelDatabase:
                 ("待读", "#2196F3"),
                 ("已读", "#9C27B0"),
                 ("连载中", "#F44336"),
-                ("最近阅读", "#FF5722")  # 新增：最近阅读分类
+                ("最近阅读", "#FF5722")
             ]
 
             for name, color in default_categories:
                 try:
                     cursor.execute(
-                        "INSERT INTO categories (name, color) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO categories (name, color) VALUES (?, ?)",
                         (name, color)
                     )
                 except sqlite3.IntegrityError:
@@ -158,6 +180,337 @@ class NovelDatabase:
                     pass
 
             conn.commit()
+        except Exception as e:
+            print(f"数据库初始化失败: {e}")
+            raise
+        finally:
+            if conn:
+                conn.close()
+
+        # 添加样例数据（只调用一次）
+        self.create_sample_data()
+
+    def get_all_books(self):
+        """获取所有书籍"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM books")
+            books = []
+            for row in cursor.fetchall():
+                book = dict(row)
+                # 解析metadata
+                if book.get('metadata'):
+                    try:
+                        metadata = json.loads(book['metadata'])
+                        book.update(metadata)
+                    except:
+                        pass
+                books.append(book)
+            return books
+
+    def get_book_downloads(self, book_id):
+        """获取书籍的下载记录"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM downloads WHERE book_id = ?", (book_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_book(self, book_id):
+        """获取单本书籍信息"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM books WHERE id = ?", (book_id,))
+            row = cursor.fetchone()
+            if row:
+                book = dict(row)
+                # 解析metadata
+                if book.get('metadata'):
+                    try:
+                        metadata = json.loads(book['metadata'])
+                        book.update(metadata)
+                    except:
+                        pass
+                return book
+            return None
+
+    def get_books_in_category(self, category_name):
+        """获取指定分类下的所有书籍"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT b.* 
+                FROM books b
+                JOIN book_categories bc ON b.id = bc.book_id
+                JOIN categories c ON bc.category_id = c.id
+                WHERE c.name = ?
+            ''', (category_name,))
+            books = []
+            for row in cursor.fetchall():
+                book = dict(row)
+                if book.get('metadata'):
+                    try:
+                        metadata = json.loads(book['metadata'])
+                        book.update(metadata)
+                    except:
+                        pass
+                books.append(book)
+            return books
+
+    def get_categories(self):
+        """获取所有分类"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM categories")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_book_categories(self, book_id):
+        """获取书籍所属的分类"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT c.name 
+                FROM categories c
+                JOIN book_categories bc ON c.id = bc.category_id
+                WHERE bc.book_id = ?
+            ''', (book_id,))
+            return [row[0] for row in cursor.fetchall()]
+
+    def get_bookmarked_books(self):
+        """获取所有带书签的书籍"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT b.*, rp.current_chapter, rp.chapter_position, rp.last_read_time
+                FROM books b
+                JOIN reading_progress rp ON b.id = rp.book_id
+                WHERE rp.bookmarked = 1
+            ''')
+            books = []
+            for row in cursor.fetchall():
+                book = dict(row)
+                if book.get('metadata'):
+                    try:
+                        metadata = json.loads(book['metadata'])
+                        book.update(metadata)
+                    except:
+                        pass
+                books.append(book)
+            return books
+
+    def create_sample_data(self):
+        """创建样例数据"""
+        # 检查是否已有数据
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM books")
+            count = cursor.fetchone()[0]
+
+            # 如果已有数据，不再添加样例
+            if count > 0:
+                return
+
+        # 创建样例书籍
+        sample_books = [
+            {
+                "id": "qidian_1021617576",
+                "source": "起点中文网",
+                "title": "诡秘之主",
+                "author": "爱潜水的乌贼",
+                "status": "已完结",
+                "chapters": "1434章",
+                "total_chapters": 1434,
+                "last_read_time": dt.datetime.now().isoformat()  # 使用别名
+            },
+            {
+                "id": "qidian_107580",
+                "source": "起点中文网",
+                "title": "斗破苍穹",
+                "author": "天蚕土豆",
+                "status": "已完结",
+                "chapters": "1623章",
+                "total_chapters": 1623,
+                "last_read_time": datetime.datetime.now().isoformat()
+            },
+            {
+                "id": "jjwxc_3663542",
+                "source": "晋江文学城",
+                "title": "镇魂",
+                "author": "Priest",
+                "status": "已完结",
+                "chapters": "112章",
+                "total_chapters": 112,
+                "last_read_time": datetime.datetime.now().isoformat()
+            },
+            {
+                "id": "jjwxc_3458185",
+                "source": "晋江文学城",
+                "title": "魔道祖师",
+                "author": "墨香铜臭",
+                "status": "已完结",
+                "chapters": "126章",
+                "total_chapters": 126,
+                "last_read_time": datetime.datetime.now().isoformat()
+            }
+        ]
+
+        # 创建样例下载记录
+        sample_downloads = [
+            {
+                "book_id": "qidian_1021617576",
+                "file_path": "downloads/诡秘之主.txt",
+                "file_size": 1024000,
+                "download_status": "completed"
+            },
+            {
+                "book_id": "qidian_107580",
+                "file_path": "downloads/斗破苍穹.txt",
+                "file_size": 1500000,
+                "download_status": "completed"
+            },
+            {
+                "book_id": "jjwxc_3663542",
+                "file_path": "downloads/镇魂.txt",
+                "file_size": 512000,
+                "download_status": "completed"
+            },
+            {
+                "book_id": "jjwxc_3458185",
+                "file_path": "downloads/魔道祖师.txt",
+                "file_size": 600000,
+                "download_status": "completed"
+            }
+        ]
+
+        # 创建样例阅读进度
+        sample_progress = [
+            {
+                "book_id": "qidian_1021617576",
+                "current_chapter": 250,
+                "chapter_position": 0.35,
+                "bookmarked": 1,
+                "notes": "非常精彩的世界观设定"
+            },
+            {
+                "book_id": "qidian_107580",
+                "current_chapter": 1200,
+                "chapter_position": 0.75,
+                "bookmarked": 0,
+                "notes": "经典玄幻小说"
+            },
+            {
+                "book_id": "jjwxc_3663542",
+                "current_chapter": 80,
+                "chapter_position": 0.15,
+                "bookmarked": 1,
+                "notes": "人物塑造深刻"
+            }
+        ]
+
+        # 创建样例阅读历史
+        sample_history = [
+            {
+                "book_id": "qidian_1021617576",
+                "duration": 3600,  # 1小时
+                "chapters_read": 5
+            },
+            {
+                "book_id": "qidian_107580",
+                "duration": 1800,  # 30分钟
+                "chapters_read": 3
+            }
+        ]
+
+        # 使用线程锁确保安全插入数据
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # 插入书籍数据
+                for book in sample_books:
+                    # 将额外信息保存到metadata字段
+                    metadata = {
+                        'source': book.get('source', ''),
+                        'additional': {k: v for k, v in book.items() if k not in [
+                            'id', 'title', 'author', 'status', 'chapters', 'source'
+                        ]}
+                    }
+
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO books 
+                        (id, source, title, author, status, chapters, metadata, total_chapters, last_read_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        book['id'],
+                        book['source'],
+                        book['title'],
+                        book['author'],
+                        book['status'],
+                        book['chapters'],
+                        json.dumps(metadata),
+                        book.get('total_chapters', 0),
+                        book.get('last_read_time', datetime.datetime.now().isoformat())
+                    ))
+
+                # 插入下载记录
+                for download in sample_downloads:
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO downloads 
+                        (book_id, file_path, file_size, download_status)
+                        VALUES (?, ?, ?, ?)
+                    ''', (
+                        download['book_id'],
+                        download['file_path'],
+                        download['file_size'],
+                        download['download_status']
+                    ))
+
+                # 插入阅读进度
+                for progress in sample_progress:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO reading_progress 
+                        (book_id, current_chapter, chapter_position, bookmarked, notes)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (
+                        progress['book_id'],
+                        progress['current_chapter'],
+                        progress['chapter_position'],
+                        progress['bookmarked'],
+                        progress['notes']
+                    ))
+
+                # 插入阅读历史
+                for history in sample_history:
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO reading_history 
+                        (book_id, duration, chapters_read)
+                        VALUES (?, ?, ?)
+                    ''', (
+                        history['book_id'],
+                        history['duration'],
+                        history['chapters_read']
+                    ))
+
+                # 添加书籍到分类
+                # 所有书籍添加到"已下载"分类
+                for book in sample_books:
+                    self._add_book_to_category(book['id'], "已下载", cursor)
+
+                # 添加书签书籍到"收藏"分类
+                for progress in sample_progress:
+                    if progress['bookmarked']:
+                        self._add_book_to_category(progress['book_id'], "收藏", cursor)
+
+                # 添加最近阅读书籍到"最近阅读"分类
+                self._add_book_to_category("qidian_1021617576", "最近阅读", cursor)
+                self._add_book_to_category("qidian_107580", "最近阅读", cursor)
+
+                conn.commit()
 
     def save_book(self, book_info):
         """保存或更新书籍信息"""
@@ -207,15 +560,16 @@ class NovelDatabase:
 
             conn.commit()
 
-    def set_custom_db_path(self, new_path):
-        """设置自定义数据库路径并保存到配置文件"""
+    def set_custom_db_path(self, new_folder):
+        """设置自定义数据库文件夹路径并保存到配置文件"""
         # 确保目录存在
-        db_dir = os.path.dirname(new_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
+        os.makedirs(new_folder, exist_ok=True)
+
+        # 数据库文件路径为：新文件夹 + 默认文件名
+        db_file_path = os.path.join(new_folder, "novel_database.db")
 
         # 更新当前路径
-        self.db_path = new_path
+        self.db_path = db_file_path
 
         # 保存到配置文件
         app_data_dir = self.get_app_data_dir()
@@ -229,7 +583,7 @@ class NovelDatabase:
             except:
                 pass
 
-        config["database_path"] = new_path
+        config["database_folder"] = new_folder  # 存储文件夹路径
 
         # 确保配置目录存在
         app_data_dir.mkdir(parents=True, exist_ok=True)
@@ -241,48 +595,135 @@ class NovelDatabase:
         self.init_database()
 
     def record_download(self, book_id, file_path, status="completed"):
-        """记录下载信息"""
+        """记录下载信息 - 使用线程锁确保安全"""
         try:
             file_size = os.path.getsize(file_path)
         except OSError:
             file_size = 0
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO downloads (book_id, file_path, file_size, download_status)
+        # 使用线程锁确保数据库访问安全
+        with self.lock:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO downloads (book_id, file_path, file_size, download_status)
+                        VALUES (?, ?, ?, ?)
+                    ''', (book_id, file_path, file_size, status))
+
+                    # 如果下载成功，添加到"已下载"分类
+                    if status == "completed":
+                        # 使用内部方法避免递归锁
+                        self._add_book_to_category(book_id, "已下载", cursor)
+
+                    conn.commit()
+            except sqlite3.OperationalError as e:
+                print(f"数据库操作错误: {e}")
+                # 重试机制
+                time.sleep(0.1)
+                self.record_download(book_id, file_path, status)
+            except Exception as e:
+                print(f"记录下载信息失败: {e}")
+
+    def record_reading_time(self, book_id, reading_time, current_chapter):
+        """记录阅读时间到数据库 - 简化实现"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+
+                    # 创建阅读历史表（如果不存在）
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS reading_history (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            book_id TEXT NOT NULL,
+                            reading_time REAL NOT NULL,
+                            current_chapter INTEGER NOT NULL,
+                            read_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (book_id) REFERENCES books(id)
+                        )
+                    ''')
+
+                    # 插入阅读记录
+                    cursor.execute('''
+                        INSERT INTO reading_history (book_id, reading_time, current_chapter)
+                        VALUES (?, ?, ?)
+                    ''', (book_id, reading_time, current_chapter))
+
+                    conn.commit()
+        except Exception as e:
+            print(f"记录阅读时间失败: {e}")
+
+    def add_bookmark(self, book_id, chapter, position, note):
+        """添加书签到数据库"""
+        try:
+            # 创建书签表（如果不存在）
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    chapter INTEGER NOT NULL,
+                    position REAL NOT NULL,
+                    note TEXT,
+                    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (book_id) REFERENCES books(id)
+                )
+            ''')
+
+            # 插入书签
+            self.cursor.execute('''
+                INSERT INTO bookmarks (book_id, chapter, position, note)
                 VALUES (?, ?, ?, ?)
-            ''', (book_id, file_path, file_size, status))
+            ''', (book_id, chapter, position, note))
 
-            # 确保添加到"已下载"分类
-            self.add_book_to_category(book_id, "已下载")
-
-            conn.commit()
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"添加书签失败: {e}")
+            return False
 
     # 新增：保存阅读进度
-    def save_reading_progress(self, book_id, current_chapter, chapter_position, notes=None):
-        """保存阅读进度"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+    def save_reading_progress(self, book_id, current_chapter, chapter_position, bookmarked=False, notes=''):
+        """保存阅读进度，包括书签和笔记，并自动添加到最近阅读分类"""
+        max_retries = 5
+        retry_delay = 0.1  # 100毫秒
 
-            # 更新书籍的最后阅读时间
-            cursor.execute('''
-                UPDATE books 
-                SET last_read_time = CURRENT_TIMESTAMP 
-                WHERE id = ?
-            ''', (book_id,))
+        for attempt in range(max_retries):
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    # 检查记录是否存在
+                    cursor.execute("SELECT 1 FROM reading_progress WHERE book_id = ?", (book_id,))
+                    exists = cursor.fetchone()
 
-            # 更新阅读进度
-            cursor.execute('''
-                INSERT OR REPLACE INTO reading_progress 
-                (book_id, current_chapter, chapter_position, last_read_time, notes) 
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
-            ''', (book_id, current_chapter, chapter_position, notes))
+                    if exists:
+                        # 更新现有记录
+                        cursor.execute('''
+                            UPDATE reading_progress 
+                            SET current_chapter = ?, chapter_position = ?, last_read_time = ?, bookmarked = ?, notes = ?
+                            WHERE book_id = ?
+                        ''', (current_chapter, chapter_position, datetime.now(), bookmarked, notes, book_id))
+                    else:
+                        # 插入新记录
+                        cursor.execute('''
+                            INSERT INTO reading_progress (book_id, current_chapter, chapter_position, last_read_time, bookmarked, notes)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        ''', (book_id, current_chapter, chapter_position, datetime.now(), bookmarked, notes))
 
-            # 添加到"最近阅读"分类
-            self.add_book_to_category(book_id, "最近阅读")
+                    conn.commit()
 
-            conn.commit()
+                    # 同时将书籍添加到"最近阅读"分类
+                    self.add_book_to_category(book_id, "最近阅读")
+                    return True
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    # 如果是数据库锁定错误，等待后重试
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避策略
+                else:
+                    print(f"保存阅读进度失败: {e}")
+                    return False
+        return False
 
     # 新增：获取阅读进度
     def get_reading_progress(self, book_id):
@@ -350,37 +791,31 @@ class NovelDatabase:
     # 新增：设置书签
     def toggle_bookmark(self, book_id):
         """切换书签状态"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        with self.lock:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
 
-            # 获取当前书签状态
-            cursor.execute("SELECT bookmarked FROM reading_progress WHERE book_id = ?", (book_id,))
-            row = cursor.fetchone()
+                    # 检查书签状态
+                    cursor.execute("SELECT bookmarked FROM reading_progress WHERE book_id=?", (book_id,))
+                    row = cursor.fetchone()
 
-            if row:
-                new_state = 0 if row[0] else 1
-                cursor.execute('''
-                    UPDATE reading_progress 
-                    SET bookmarked = ?
-                    WHERE book_id = ?
-                ''', (new_state, book_id))
+                    if row:
+                        # 切换书签状态
+                        new_value = 0 if row[0] else 1
+                        cursor.execute("UPDATE reading_progress SET bookmarked=? WHERE book_id=?", (new_value, book_id))
+                    else:
+                        # 创建新记录
+                        cursor.execute("""
+                            INSERT INTO reading_progress (book_id, bookmarked) 
+                            VALUES (?, 1)
+                        """, (book_id,))
 
-                # 添加到或从"收藏"分类中移除
-                if new_state:
-                    self.add_book_to_category(book_id, "收藏")
-                else:
-                    self.remove_book_from_category(book_id, "收藏")
-            else:
-                # 如果没有阅读记录，创建一个
-                cursor.execute('''
-                    INSERT INTO reading_progress 
-                    (book_id, bookmarked) 
-                    VALUES (?, 1)
-                ''', (book_id,))
-                self.add_book_to_category(book_id, "收藏")
-
-            conn.commit()
-            return new_state
+                    conn.commit()
+                    return new_value if row else 1
+            except Exception as e:
+                print(f"切换书签失败: {e}")
+                return None
 
     # 新增：获取所有带书签的书籍
     def get_bookmarked_books(self):
@@ -408,11 +843,24 @@ class NovelDatabase:
 
             return books
 
-    def add_book_to_category(self, book_id, category_name):
-        """将书籍添加到分类"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+    def _add_book_to_category(self, book_id, category_name, cursor=None):
+        """内部方法 - 将书籍添加到分类"""
+        try:
+            if cursor is None:
+                # 如果没有提供游标，创建新的连接
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    self._add_book_to_category_internal(book_id, category_name, cursor)
+                    conn.commit()
+            else:
+                # 使用提供的游标
+                self._add_book_to_category_internal(book_id, category_name, cursor)
+        except Exception as e:
+            print(f"添加书籍到分类失败: {e}")
 
+    def _add_book_to_category_internal(self, book_id, category_name, cursor):
+        """内部方法 - 实际执行添加分类操作"""
+        try:
             # 获取分类ID
             cursor.execute("SELECT id FROM categories WHERE name = ?", (category_name,))
             category = cursor.fetchone()
@@ -430,14 +878,57 @@ class NovelDatabase:
             # 添加关系
             try:
                 cursor.execute(
-                    "INSERT INTO book_categories (book_id, category_id) VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO book_categories (book_id, category_id) VALUES (?, ?)",
                     (book_id, category_id)
                 )
             except sqlite3.IntegrityError:
                 # 关系已存在
                 pass
+        except Exception as e:
+            print(f"添加书籍到分类失败: {e}")
 
-            conn.commit()
+    def add_book_to_category(self, book_id, category_name):
+        """将书籍添加到指定分类，如果分类不存在则创建"""
+        max_retries = 5
+        retry_delay = 0.1
+
+        for attempt in range(max_retries):
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    # 获取分类ID
+                    cursor.execute("SELECT id FROM categories WHERE name = ?", (category_name,))
+                    category_row = cursor.fetchone()
+
+                    if category_row:
+                        category_id = category_row[0]
+                    else:
+                        # 创建新分类
+                        cursor.execute("INSERT INTO categories (name) VALUES (?)", (category_name,))
+                        category_id = cursor.lastrowid
+
+                    # 检查是否已经存在关联
+                    cursor.execute(
+                        "SELECT 1 FROM book_categories WHERE book_id = ? AND category_id = ?",
+                        (book_id, category_id)
+                    )
+                    exists = cursor.fetchone()
+
+                    if not exists:
+                        cursor.execute(
+                            "INSERT INTO book_categories (book_id, category_id) VALUES (?, ?)",
+                            (book_id, category_id)
+                        )
+                    conn.commit()
+                    return True
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"添加书籍到分类失败: {e}")
+                    return False
+        return False
 
     def remove_book_from_category(self, book_id, category_name):
         """从分类中移除书籍"""

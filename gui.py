@@ -419,7 +419,7 @@ class SettingsDialog(tk.Toplevel):
         current_path = ttk.Label(self, text=db.db_path)
         current_path.grid(row=0, column=1, padx=10, pady=10)
 
-        ttk.Label(self, text="新数据库位置:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        ttk.Label(self, text="新数据库文件夹:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
         self.new_path = ttk.Entry(self, width=50)
         self.new_path.grid(row=1, column=1, padx=10, pady=10)
 
@@ -432,18 +432,15 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(btn_frame, text="取消", command=self.destroy).pack(side=tk.RIGHT)
 
     def browse(self):
-        path = filedialog.asksaveasfilename(
-            title="选择数据库位置",
-            defaultextension=".db",
-            filetypes=[("SQLite数据库", "*.db"), ("所有文件", "*.*")]
-        )
+        # 选择文件夹而不是文件
+        path = filedialog.askdirectory(title="选择数据库文件夹")
         if path:
             self.new_path.delete(0, tk.END)
             self.new_path.insert(0, path)
 
     def apply(self):
-        new_path = self.new_path.get()
-        if new_path:
-            self.db.set_custom_db_path(new_path)
-            messagebox.showinfo("成功", f"数据库位置已更新为:\n{new_path}")
+        new_folder = self.new_path.get()
+        if new_folder:
+            self.db.set_custom_db_path(new_folder)
+            messagebox.showinfo("成功", f"数据库文件夹已更新为:\n{new_folder}")
             self.destroy()

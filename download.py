@@ -40,23 +40,23 @@ class Downloader:
             print(f"下载出错: {e}")
             return False
 
-    def download_qidian(self, novel_id, progress_callback):
-        """根据小说ID下载起点小说"""
+    def _common_download(self, novel_id, source, get_info_func, get_chapters_func, progress_callback):
+        """通用下载逻辑"""
         # 提取实际书籍ID
-        if novel_id.startswith("qidian_"):
-            book_id = novel_id.split("_")[1]
+        if novel_id.startswith(f"{source[:2]}_"):
+            book_id = novel_id.split("_", 1)[1]
         else:
             book_id = novel_id
 
         # 获取小说信息
-        novel_info = self.get_qidian_novel_info(book_id)
+        novel_info = get_info_func(book_id)
         if not novel_info:
             return False
 
-        novel_title = novel_info.get("title", f"起点小说_{book_id}")
+        novel_title = novel_info.get("title", f"{source}小说_{book_id}")
 
         # 获取章节列表
-        chapters = self.get_qidian_chapters(book_id)
+        chapters = get_chapters_func(book_id)
         if not chapters:
             return False
 
@@ -66,7 +66,7 @@ class Downloader:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(f"《{novel_title}》\n\n")
             f.write(f"作者: {novel_info.get('author', '未知')}\n")
-            f.write(f"来源: 起点中文网\n")
+            f.write(f"来源: {source}\n")
             f.write(f"状态: {novel_info.get('status', '未知')}\n\n")
 
         total = len(chapters)
@@ -105,13 +105,23 @@ class Downloader:
                 "id": novel_id,
                 "title": novel_title,
                 "author": novel_info.get('author', '未知'),
-                "source": "起点中文网",
+                "source": source,
                 "status": novel_info.get('status', '未知'),
                 "chapters": f"{len(chapters)}章"
             }
             self.db.save_book(book_info)
 
         return True
+
+    def download_qidian(self, novel_id, progress_callback):
+        """根据小说ID下载起点小说"""
+        return self._common_download(
+            novel_id,
+            "起点中文网",
+            self.get_qidian_novel_info,
+            self.get_qidian_chapters,
+            progress_callback
+        )
 
     def get_qidian_novel_info(self, book_id):
         """获取起点小说基本信息"""
@@ -142,76 +152,13 @@ class Downloader:
 
     def download_jjwxc(self, novel_id, progress_callback):
         """根据小说ID下载晋江小说"""
-        # 提取实际书籍ID
-        if novel_id.startswith("jjwxc_"):
-            book_id = novel_id.split("_")[1]
-        else:
-            book_id = novel_id
-
-        # 获取小说信息
-        novel_info = self.get_jjwxc_novel_info(book_id)
-        if not novel_info:
-            return False
-
-        novel_title = novel_info.get("title", f"晋江小说_{book_id}")
-
-        # 获取章节列表
-        chapters = self.get_jjwxc_chapters(book_id)
-        if not chapters:
-            return False
-
-        file_path = os.path.join(self.download_dir, f"{novel_title}.txt")
-
-        # 创建文件并写入标题
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(f"《{novel_title}》\n\n")
-            f.write(f"作者: {novel_info.get('author', '未知')}\n")
-            f.write(f"来源: 晋江文学城\n")
-            f.write(f"状态: {novel_info.get('status', '未知')}\n\n")
-
-        total = len(chapters)
-        completed = 0
-
-        # 使用线程池下载章节
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
-            for idx, (chapter_title, chapter_url) in enumerate(chapters):
-                future = executor.submit(
-                    self.download_chapter,
-                    chapter_title,
-                    chapter_url,
-                    file_path,
-                    idx
-                )
-                futures[future] = (chapter_title, idx)
-
-            # 监控下载进度
-            for future in as_completed(futures):
-                chapter_title, idx = futures[future]
-                try:
-                    success = future.result()
-                    if success:
-                        completed += 1
-                        progress = int(completed / total * 100)
-                        progress_callback(novel_id, progress)
-                except Exception as e:
-                    print(f"下载章节出错: {e}")
-
-        # 确保记录下载信息到数据库
-        if self.db:
-            self.db.record_download(novel_id, file_path)
-            # 保存书籍基本信息
-            book_info = {
-                "id": novel_id,
-                "title": novel_title,
-                "author": novel_info.get('author', '未知'),
-                "source": "晋江文学城",
-                "status": novel_info.get('status', '未知'),
-                "chapters": f"{len(chapters)}章"
-            }
-            self.db.save_book(book_info)
-
-        return True
+        return self._common_download(
+            novel_id,
+            "晋江文学城",
+            self.get_jjwxc_novel_info,
+            self.get_jjwxc_chapters,
+            progress_callback
+        )
 
     def get_jjwxc_novel_info(self, book_id):
         """获取晋江小说基本信息"""
