@@ -153,11 +153,9 @@ class NovelDownloaderApp:
         help_menu.add_command(label="关于", command=self.show_about)
         menubar.add_cascade(label="帮助", menu=help_menu)
 
-        # 添加阅读菜单
+        # 我的收藏
         read_menu = tk.Menu(menubar, tearoff=0)
-        read_menu.add_command(label="继续阅读", command=self.continue_reading)
-        read_menu.add_command(label="最近阅读", command=self.show_recently_read)
-        read_menu.add_command(label="我的书签", command=self.show_bookmarks)
+        read_menu.add_command(label="我的收藏", command=self.show_bookmarks)
         menubar.add_cascade(label="阅读", menu=read_menu)
 
     def open_db_settings(self):
@@ -349,18 +347,18 @@ class NovelDownloaderApp:
         ttk.Button(btn_frame, text="打开", command=open_selected).pack(side=tk.RIGHT)
 
     def show_bookmarks(self):
-        """显示书签列表"""
+        """显示收藏列表"""
         if not self.controller:
             return
 
         bookmarks = self.controller.db.get_bookmarked_books()
         if not bookmarks:
-            self.show_info("提示", "没有已添加书签的书籍")
+            self.show_info("提示", "没有已收藏的书籍")  # 修改提示信息
             return
 
-        # 创建新窗口显示书签列表
+        # 创建新窗口显示收藏列表
         bookmark_window = tk.Toplevel(self.root)
-        bookmark_window.title("我的书签")
+        bookmark_window.title("我的收藏")  # 修改窗口标题
         bookmark_window.geometry("500x300")
 
         # 创建列表

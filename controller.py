@@ -6,14 +6,6 @@ from download import Downloader
 from database import NovelDatabase
 from reader import NovelReader
 
-import threading
-import os
-import tkinter as tk
-from search import SearchEngine
-from download import Downloader
-from database import NovelDatabase
-from reader import NovelReader
-
 
 class Controller:
     def __init__(self, gui):
@@ -116,11 +108,6 @@ class Controller:
             self.gui.log(f"下载失败: {novel_title} (ID: {novel_id})")
             self.gui.set_status("下载失败")
             self.gui.show_warning("下载失败", f"小说《{novel_title}》下载失败，请重试")
-
-    def update_download_progress(self, novel_id, progress):
-        """更新下载进度（由下载线程调用）"""
-        # 使用after方法确保线程安全地更新GUI
-        self.gui.root.after(0, self.gui.update_progress, novel_id, progress)
 
     def update_download_progress(self, novel_id, progress):
         """更新下载进度（由下载线程调用）"""

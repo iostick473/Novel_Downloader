@@ -92,8 +92,8 @@ class LibraryBrowser:
         # 删除按钮
         ttk.Button(btn_frame, text="删除", command=self.delete_book).pack(side=tk.LEFT, padx=5)
 
-        # 书签按钮
-        ttk.Button(btn_frame, text="添加书签", command=self.toggle_bookmark).pack(side=tk.LEFT, padx=5)
+        # 收藏按钮
+        ttk.Button(btn_frame, text="收藏小说", command=self.toggle_bookmark).pack(side=tk.LEFT, padx=5)
 
         # 查看详情按钮
         ttk.Button(btn_frame, text="查看详情", command=self.show_book_details).pack(side=tk.LEFT, padx=5)
@@ -276,7 +276,7 @@ class LibraryBrowser:
         messagebox.showinfo("成功", f"《{title}》已从数据库中删除")
 
     def toggle_bookmark(self):
-        """切换书签状态"""
+        """切换收藏状态"""
         selected = self.book_tree.selection()
         if not selected:
             return
@@ -286,18 +286,18 @@ class LibraryBrowser:
         book_id = values[0]
         title = values[1]
 
-        # 切换书签状态
+        # 切换收藏状态
         self.db.toggle_bookmark(book_id)
 
         # 重新加载书籍列表
         self.load_books()
 
-        # 获取当前书签状态
+        # 获取当前收藏状态
         book_categories = self.db.get_book_categories(book_id)
         if "收藏" in book_categories:
-            messagebox.showinfo("成功", f"已为《{title}》添加书签")
+            messagebox.showinfo("成功", f"已收藏《{title}》")
         else:
-            messagebox.showinfo("成功", f"已移除《{title}》的书签")
+            messagebox.showinfo("成功", f"已取消收藏《{title}》")
 
     def show_book_details(self):
         """显示书籍详情"""
@@ -326,7 +326,7 @@ class LibraryBrowser:
         if progress:
             progress_info = f"当前章节: {progress.get('current_chapter', 1)}\n阅读位置: {int(progress.get('chapter_position', 0) * 100)}%"
             if progress.get('bookmarked'):
-                progress_info += "\n已添加书签"
+                progress_info += "\n已收藏"
 
         # 创建详情窗口
         detail_window = tk.Toplevel(self.root)

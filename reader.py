@@ -18,11 +18,12 @@ class NovelReader:
         # 初始化所有属性
         self.chapters = []  # 章节列表
         self.current_chapter_index = 0  # 当前章节索引
-        self.bookmarked = False  # 书签状态
+        self.bookmarked = False  # 收藏状态
         self.reading_progress = None  # 阅读进度
         self.reading_start_time = datetime.now()  # 开始阅读时间
         self.night_mode = False  # 夜间模式
         self.notes_text = None  # 笔记文本框
+        self.chapter_positions = {}  # 章节起始位置标记
 
         # 设置窗口标题
         if self.book_info:
@@ -42,17 +43,14 @@ class NovelReader:
         # 解析小说内容
         self.chapters = self.parse_novel_content()
 
-        # 加载当前章节
+        # 一次性加载所有章节
         if self.chapters:
-            self.display_current_chapter()
+            self.display_all_chapters()
         else:
             messagebox.showerror("错误", "无法加载小说内容")
 
         # 设置窗口关闭事件
         root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-        # 跟踪阅读时间
-        self.root.after(60000, self.update_reading_time)
 
     def create_widgets(self):
         """创建阅读器界面组件"""
@@ -74,8 +72,10 @@ class NovelReader:
         self.next_btn = ttk.Button(nav_frame, text="下一章", command=self.next_chapter)
         self.next_btn.pack(side=tk.LEFT, padx=5)
 
-        # 目录按钮
-        ttk.Button(nav_frame, text="目录", command=self.show_chapter_list).pack(side=tk.LEFT, padx=5)
+        # 章节跳转按钮（功能暂不可用）
+        self.chapter_jump_btn = ttk.Button(toolbar, text="章节跳转(暂不可用)", command=self.show_chapter_list)
+        self.chapter_jump_btn.pack(side=tk.LEFT, padx=5)
+        self.chapter_jump_btn.config(state=tk.DISABLED)
 
         # 进度显示
         progress_frame = ttk.Frame(toolbar)
@@ -89,9 +89,11 @@ class NovelReader:
         btn_frame = ttk.Frame(toolbar)
         btn_frame.pack(side=tk.RIGHT)
 
-        # 书签按钮
-        self.bookmark_btn = ttk.Button(btn_frame, text="添加书签", command=self.toggle_bookmark)
+        # 收藏按钮
+        self.bookmark_btn = ttk.Button(btn_frame, text="收藏", command=self.toggle_bookmark)
         self.bookmark_btn.pack(side=tk.LEFT, padx=5)
+        # 启用收藏按钮
+        self.bookmark_btn.config(state=tk.NORMAL)
 
         # 夜间模式按钮
         self.night_mode_btn = ttk.Button(btn_frame, text="夜间模式", command=self.toggle_night_mode)
@@ -131,86 +133,50 @@ class NovelReader:
         self.text_area.pack(fill=tk.BOTH, expand=True)
         self.text_area.config(state=tk.DISABLED)
 
-        # 绑定滚动事件以更新位置
-        self.text_area.bind("<MouseWheel>", self.update_position)
-        self.text_area.bind("<Button-4>", self.update_position)  # Linux向上滚动
-        self.text_area.bind("<Button-5>", self.update_position)  # Linux向下滚动
-        self.text_area.bind("<Key>", self.update_position)  # 键盘导航
+        # 只保留滚动事件绑定，删除键盘导航绑定
+        self.text_area.bind("<MouseWheel>", self.on_scroll)
+        self.text_area.bind("<Button-4>", self.on_scroll)  # Linux向上滚动
+        self.text_area.bind("<Button-5>", self.on_scroll)  # Linux向下滚动
 
-    def prev_chapter(self):
-        """跳转到上一章"""
-        if self.current_chapter_index > 0:
-            self.current_chapter_index -= 1
-            self.display_current_chapter()
+    def display_all_chapters(self):
+        """一次性显示所有章节"""
+        self.text_area.config(state=tk.NORMAL)
+        self.text_area.delete(1.0, tk.END)
 
-    def next_chapter(self):
-        """跳转到下一章"""
-        if self.current_chapter_index < len(self.chapters) - 1:
-            self.current_chapter_index += 1
-            self.display_current_chapter()
+        # 清空章节位置标记
+        self.chapter_positions = {}
 
-    def add_bookmark(self):
-        """添加书签"""
-        # 获取当前章节和位置
-        current_chapter = self.current_chapter_index + 1
-        position = self.get_scroll_position()
-        note = self.notes_text.get("1.0", tk.END).strip()  # 获取笔记内容
+        # 添加所有章节内容
+        for idx, chapter in enumerate(self.chapters):
+            # 标记章节起始位置
+            self.chapter_positions[idx] = self.text_area.index(tk.END)
 
-        # 在后台线程中执行数据库操作
-        threading.Thread(
-            target=self._save_bookmark_in_thread,
-            args=(self.book_id, current_chapter, position, note),
-            daemon=True
-        ).start()
+            # 添加章节标题
+            self.text_area.insert(tk.END, f"{chapter['title']}\n\n", "title")
+            # 添加章节内容
+            self.text_area.insert(tk.END, chapter['content'] + "\n\n")
 
-        # 更新UI状态
-        self.bookmarked = True
-        self.update_bookmark_button()
-
-        # 显示成功消息（非阻塞方式）
-        self.show_status_message("书签已添加")
-
-    def _save_bookmark_in_thread(self, book_id, chapter, position, note):
-        """在后台线程中保存书签"""
-        try:
-            # 创建新的数据库连接（避免线程安全问题）
-            from database import NovelDatabase
-            db = NovelDatabase(self.db.db_path)  # 使用相同的数据库路径
-
-            # 保存书签
-            db.add_bookmark(book_id, chapter, position, note)
-        except Exception as e:
-            # 在主线程显示错误
-            self.root.after(0, lambda: messagebox.showerror("错误", f"保存书签失败: {e}"))
-
-    def display_current_chapter(self):
-        """显示当前章节内容"""
-        if not self.chapters or self.current_chapter_index >= len(self.chapters):
-            return
-
-        chapter = self.chapters[self.current_chapter_index]
+        self.text_area.config(state=tk.DISABLED)
 
         # 更新章节标签
         self.chapter_label.config(text=f"章节: {self.current_chapter_index + 1}/{len(self.chapters)}")
 
-        # 更新文本内容
-        self.text_area.config(state=tk.NORMAL)
-        self.text_area.delete(1.0, tk.END)
-        self.text_area.insert(tk.END, f"{chapter['title']}\n\n{chapter['content']}")
-        self.text_area.config(state=tk.DISABLED)
-
-        # 恢复滚动位置
-        if self.reading_progress and self.current_chapter_index + 1 == self.reading_progress.get('current_chapter', 1):
-            position = self.reading_progress.get('chapter_position', 0)
-            self.text_area.yview_moveto(position)
+        # 滚动到当前章节位置
+        if self.current_chapter_index in self.chapter_positions:
+            self.text_area.see(self.chapter_positions[self.current_chapter_index])
+            self.text_area.yview_moveto(
+                self.reading_progress.get('chapter_position', 0)
+            )
 
     def load_reading_progress(self):
         """从数据库加载阅读进度"""
         self.reading_progress = self.db.get_reading_progress(self.book_id)
 
         if self.reading_progress:
-            # 从数据库加载书签状态
+            # 从数据库加载收藏状态
             self.bookmarked = bool(self.reading_progress.get('bookmarked', False))
+            # 设置当前章节索引
+            self.current_chapter_index = self.reading_progress.get('current_chapter', 1) - 1
         else:
             # 初始化默认进度
             self.reading_progress = {
@@ -222,34 +188,6 @@ class NovelReader:
                 'start_chapter': 1
             }
             self.bookmarked = False
-
-        # 更新书签按钮状态
-        self.update_bookmark_button()
-
-    def load_novel_content(self):
-        """加载小说内容"""
-        try:
-            # 尝试解析小说内容
-            self.chapters = self.parse_novel_content()
-
-            if not self.chapters:
-                messagebox.showerror("错误", "无法解析小说内容")
-                return
-
-            # 设置当前章节索引
-            if self.reading_progress:
-                # 确保进度中的章节索引在有效范围内
-                progress_chapter = self.reading_progress.get('current_chapter', 1)
-                self.current_chapter_index = max(0, min(progress_chapter - 1, len(self.chapters) - 1))
-            else:
-                self.current_chapter_index = 0
-
-            # 显示当前章节
-            self.display_current_chapter()
-        except Exception as e:
-            messagebox.showerror("错误", f"加载小说内容失败: {e}")
-            # 设置默认值
-            self.chapters = []
             self.current_chapter_index = 0
 
     def parse_novel_content(self):
@@ -316,228 +254,6 @@ class NovelReader:
         except Exception as e:
             messagebox.showerror("解析错误", f"解析小说内容失败: {e}")
             return [{"title": "错误", "content": f"无法解析小说内容: {str(e)}"}]
-
-    def parse_chapters(self):
-        """解析小说章节"""
-        # 使用正则表达式匹配章节标题
-        # 支持多种章节格式：第X章、第X节、Chapter X等
-        chapter_pattern = r'(第[零一二三四五六七八九十百千\d]+章|第[零一二三四五六七八九十百千\d]+节|Chapter\s+\d+|卷[零一二三四五六七八九十百千\d]+)\s+(.*?)\n'
-
-        self.chapters = []
-        matches = re.finditer(chapter_pattern, self.full_content)
-
-        last_end = 0
-        for match in matches:
-            start, end = match.span()
-            title = match.group(0).strip()
-
-            # 添加上一章节的内容
-            if start > last_end:
-                chapter_content = self.full_content[last_end:start]
-                self.chapters.append({
-                    'title': f"第{len(self.chapters) + 1}章",
-                    'content': chapter_content
-                })
-
-            # 添加当前章节
-            self.chapters.append({
-                'title': title,
-                'content': self.full_content[start:end]
-            })
-            last_end = end
-
-        # 添加最后一章
-        if last_end < len(self.full_content):
-            chapter_content = self.full_content[last_end:]
-            self.chapters.append({
-                'title': f"第{len(self.chapters) + 1}章",
-                'content': chapter_content
-            })
-
-        # 如果没有找到章节，将整个内容作为一章
-        if not self.chapters:
-            self.chapters.append({
-                'title': "全文",
-                'content': self.full_content
-            })
-
-
-
-    def show_current_chapter(self):
-        """显示当前章节内容"""
-        chapter_index = self.reading_progress['current_chapter'] - 1
-
-        if chapter_index < 0:
-            chapter_index = 0
-        if chapter_index >= len(self.chapters):
-            chapter_index = len(self.chapters) - 1
-
-        chapter = self.chapters[chapter_index]
-
-        # 更新文本区域
-        self.text_area.config(state=tk.NORMAL)
-        self.text_area.delete(1.0, tk.END)
-
-        # 添加章节标题（大号字体）
-        self.text_area.tag_configure("title", font=("宋体", 16, "bold"))
-        self.text_area.insert(tk.END, f"{chapter['title']}\n\n", "title")
-
-        # 添加章节内容
-        self.text_area.insert(tk.END, chapter['content'])
-        self.text_area.config(state=tk.DISABLED)
-
-        # 滚动到保存的位置
-        position = self.reading_progress['chapter_position']
-        if position > 0:
-            self.text_area.yview_moveto(position)
-
-        # 更新进度显示
-        self.update_progress_display()
-
-    def update_progress_display(self):
-        """更新进度显示"""
-        current = self.reading_progress['current_chapter']
-        total = len(self.chapters)
-        percentage = int((current / total) * 100)
-        self.progress_var.set(f"{current}/{total}章 ({percentage}%)")
-
-    def prev_chapter(self):
-        """跳转到上一章"""
-        if self.reading_progress['current_chapter'] > 1:
-            self.save_current_position()
-            self.reading_progress['current_chapter'] -= 1
-            self.reading_progress['chapter_position'] = 0
-            self.show_current_chapter()
-
-    def next_chapter(self):
-        """跳转到下一章"""
-        if self.reading_progress['current_chapter'] < len(self.chapters):
-            self.save_current_position()
-            self.reading_progress['current_chapter'] += 1
-            self.reading_progress['chapter_position'] = 0
-            self.show_current_chapter()
-
-    def show_chapter_list(self):
-        """显示章节列表"""
-        chapter_dialog = tk.Toplevel(self.root)
-        chapter_dialog.title("章节列表")
-        chapter_dialog.geometry("400x500")
-
-        # 创建章节列表
-        tree = ttk.Treeview(chapter_dialog, columns=("title"), show="tree")
-        tree.column("#0", width=0, stretch=tk.NO)  # 隐藏第一列
-
-        for i, chapter in enumerate(self.chapters, 1):
-            # 使用字典格式访问章节标题
-            tree.insert("", "end", iid=i, values=(chapter['title'],))
-
-        tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # 跳转到当前章节
-        current_chapter = self.reading_progress['current_chapter']
-        if 1 <= current_chapter <= len(self.chapters):
-            tree.selection_set(current_chapter)
-            tree.see(current_chapter)
-
-        def jump_to_chapter():
-            selected = tree.selection()
-            if not selected:
-                return
-
-            chapter_index = int(selected[0])
-            self.reading_progress['current_chapter'] = chapter_index
-            self.reading_progress['chapter_position'] = 0
-            self.show_current_chapter()
-            chapter_dialog.destroy()
-
-        btn_frame = ttk.Frame(chapter_dialog)
-        btn_frame.pack(pady=10)
-
-        ttk.Button(btn_frame, text="跳转", command=jump_to_chapter).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=chapter_dialog.destroy).pack(side=tk.LEFT, padx=5)
-
-    def get_scroll_position(self):
-        """获取当前滚动位置（0.0到1.0）"""
-        if hasattr(self, 'text_area'):
-            return self.text_area.yview()[0]
-        return 0.0
-
-    def update_position(self, event=None):
-        """更新阅读位置"""
-        # 获取当前滚动位置（0.0到1.0）
-        position = self.text_area.yview()[0]
-        self.reading_progress['chapter_position'] = position
-
-        # 自动保存位置（每30秒一次）
-        if not hasattr(self, 'last_save_time') or (datetime.now() - self.last_save_time).seconds > 30:
-            self.save_current_position()
-
-    def save_current_position(self):
-        """保存当前阅读位置到数据库"""
-        if not self.chapters:
-            return
-
-        # 获取当前章节索引（从1开始）
-        current_chapter = self.current_chapter_index + 1
-        # 获取当前章节内的滚动位置（0.0到1.0）
-        position = self.get_scroll_position()
-
-        # 安全获取书签状态
-        bookmarked = getattr(self, 'bookmarked', False)
-
-        # 安全获取笔记内容
-        notes = ""
-        if hasattr(self, 'notes_text'):
-            try:
-                notes = self.notes_text.get("1.0", tk.END).strip()
-            except:
-                pass
-
-        # 保存进度 - 使用线程避免阻塞UI
-        threading.Thread(
-            target=self.db.save_reading_progress,
-            args=(
-                self.book_id,
-                current_chapter,
-                position,
-                bookmarked,
-                notes
-            ),
-            daemon=True
-        ).start()
-
-    def toggle_bookmark(self):
-        """切换书签状态 - 修复卡死问题"""
-        # 先更新UI状态
-        self.bookmarked = not self.bookmarked
-        self.update_bookmark_button()
-
-        # 在后台线程中更新数据库
-        def db_operation():
-            try:
-                # 调用数据库方法切换书签
-                self.db.toggle_bookmark(self.book_id)
-
-                # 更新UI状态
-                status = "已添加" if self.bookmarked else "已移除"
-                self.root.after(0, lambda: messagebox.showinfo("书签", f"{status}书签"))
-            except Exception as e:
-                # 如果出错，恢复原来的状态
-                self.bookmarked = not self.bookmarked
-                self.root.after(0, self.update_bookmark_button)
-                self.root.after(0, lambda: messagebox.showerror("错误", f"更新书签失败: {e}"))
-
-        # 启动后台线程
-        threading.Thread(target=db_operation, daemon=True).start()
-
-    def update_bookmark_button(self):
-        """更新书签按钮状态 - 修复卡死问题"""
-        if hasattr(self, 'bookmark_btn'):
-            if self.bookmarked:
-                self.bookmark_btn.config(text="★ 已书签")
-            else:
-                self.bookmark_btn.config(text="☆ 添加书签")
-
 
     def toggle_night_mode(self):
         """切换夜间模式"""
@@ -641,28 +357,6 @@ class NovelReader:
         spacing = self.line_spacing.get()
         self.text_area.config(spacing1=spacing, spacing2=spacing, spacing3=spacing)
 
-    def update_reading_time(self):
-        """更新阅读时间记录"""
-        now = datetime.now()
-        duration = (now - self.reading_start_time).seconds
-
-        # 如果阅读时间超过1分钟，保存阅读历史
-        if duration > 60:
-            # 计算阅读的章节数
-            current_chapter = self.reading_progress['current_chapter']
-            start_chapter = self.reading_progress.get('start_chapter', current_chapter)
-            chapters_read = current_chapter - start_chapter + 1
-
-            # 保存阅读历史
-            self.db.add_reading_history(self.book_id, duration, chapters_read)
-
-            # 重置计时
-            self.reading_start_time = now
-            self.reading_progress['start_chapter'] = current_chapter
-
-        # 每分钟检查一次
-        self.root.after(60000, self.update_reading_time)
-
     def on_close(self):
         """窗口关闭事件处理"""
         # 保存当前位置 - 使用同步方式确保在关闭前保存
@@ -673,13 +367,12 @@ class NovelReader:
 
             # 安全获取滚动位置
             position = 0.0
-            if hasattr(self, 'get_scroll_position'):
-                try:
-                    position = self.get_scroll_position()
-                except:
-                    pass
+            try:
+                position = self.text_area.yview()[0]
+            except:
+                pass
 
-            # 安全获取书签状态
+            # 安全获取收藏状态
             bookmarked = getattr(self, 'bookmarked', False)
 
             # 安全获取笔记内容
@@ -699,28 +392,83 @@ class NovelReader:
                 notes
             )
 
-        # 记录阅读时间
-        if hasattr(self, 'reading_start_time'):
-            # 确保使用 datetime.now() 而不是 datetime.datetime.now()
-            reading_time = (datetime.now() - self.reading_start_time).total_seconds()
-            current_chapter = getattr(self, 'current_chapter_index', 0) + 1
-
-            # 检查数据库是否有 record_reading_time 方法
-            if hasattr(self.db, 'record_reading_time'):
-                self.db.record_reading_time(self.book_id, reading_time, current_chapter)
-            else:
-                # 如果方法不存在，打印警告
-                print("警告: 数据库缺少 record_reading_time 方法")
-
         # 关闭窗口
         self.root.destroy()
 
     def on_scroll(self, event):
-        """处理滚动事件"""
-        # 更新滚动位置
-        self.update_scroll_position()
+        """处理滚动事件，只更新当前章节索引"""
+        # 更新当前章节索引
+        self.update_current_chapter_index()
 
-        # 延迟保存位置 - 避免频繁保存
-        if hasattr(self, 'save_timer'):
-            self.root.after_cancel(self.save_timer)
-        self.save_timer = self.root.after(2000, self.save_current_position)  # 2秒后保存
+    def update_current_chapter_index(self):
+        """根据可见内容确定当前章节索引"""
+        visible_start = self.text_area.yview()[0]
+        for idx, pos in sorted(self.chapter_positions.items(), reverse=True):
+            if float(pos) <= visible_start:
+                self.current_chapter_index = idx
+                self.chapter_label.config(text=f"章节: {self.current_chapter_index + 1}/{len(self.chapters)}")
+                break
+
+    def next_chapter(self):
+        """跳转到下一章开头位置"""
+        if self.current_chapter_index < len(self.chapters) - 1:
+            # 更新当前章节索引
+            self.current_chapter_index += 1
+
+            # 跳转到下一章开头位置
+            if self.current_chapter_index in self.chapter_positions:
+                self.text_area.see(self.chapter_positions[self.current_chapter_index])
+
+            # 更新章节标签
+            self.chapter_label.config(text=f"章节: {self.current_chapter_index + 1}/{len(self.chapters)}")
+
+            # 保存位置
+            self.save_current_position()
+
+    def prev_chapter(self):
+        """跳转到上一章开头位置"""
+        if self.current_chapter_index > 0:
+            # 更新当前章节索引
+            self.current_chapter_index -= 1
+
+            # 跳转到上一章开头位置
+            if self.current_chapter_index in self.chapter_positions:
+                self.text_area.see(self.chapter_positions[self.current_chapter_index])
+
+            # 更新章节标签
+            self.chapter_label.config(text=f"章节: {self.current_chapter_index + 1}/{len(self.chapters)}")
+
+            # 保存位置
+            self.save_current_position()
+
+    def save_current_position(self):
+        """保存当前阅读位置"""
+        # 获取当前滚动位置
+        position = self.text_area.yview()[0]
+
+        # 保存到数据库
+        threading.Thread(
+            target=self.db.save_reading_progress,
+            args=(
+                self.book_id,
+                self.current_chapter_index + 1,  # 1-based索引
+                position
+            ),
+            daemon=True
+        ).start()
+
+    def toggle_bookmark(self):
+        """切换收藏状态"""
+        self.bookmarked = not self.bookmarked
+        # 更新按钮文本
+        self.bookmark_btn.config(text="取消收藏" if self.bookmarked else "收藏")
+        # 保存收藏状态
+        self.db.toggle_bookmark(self.book_id)
+        # 显示提示信息
+        status = "已收藏" if self.bookmarked else "已取消收藏"
+        messagebox.showinfo("提示", f"{self.book_info['title']} {status}")
+
+#架空
+    def show_chapter_list(self):
+        """章节跳转功能（暂不可用）"""
+        pass

@@ -195,7 +195,6 @@ class Downloader:
             # 提取小说标题
             title_tag = soup.find('div', class_='book-info-top').find('h1')
             title = title_tag.get_text(strip=True) if title_tag else f"起点小说_{book_id}"
-            print(title_tag)
 
             # 提取作者
             author_tag = soup.find('a', class_='writer-name')
