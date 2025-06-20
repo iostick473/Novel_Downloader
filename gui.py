@@ -142,18 +142,14 @@ class NovelDownloaderApp:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="打开下载目录", command=self.open_download_dir)
-        file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
+        # 移除了退出选项
         menubar.add_cascade(label="文件", menu=file_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="关于", command=self.show_about)
         menubar.add_cascade(label="帮助", menu=help_menu)
 
-        # 我的收藏
-        read_menu = tk.Menu(menubar, tearoff=0)
-        read_menu.add_command(label="我的收藏", command=self.show_bookmarks)
-        menubar.add_cascade(label="阅读", menu=read_menu)
+        # 移除了"阅读"菜单
 
     def open_db_settings(self):
         SettingsDialog(self.root, self.controller.db)
@@ -255,140 +251,6 @@ class NovelDownloaderApp:
 
     def show_info(self, title, message):
         messagebox.showinfo(title, message)
-
-    def continue_reading(self):
-        """继续上次阅读"""
-        if not self.controller:
-            return
-
-        recently_read = self.controller.get_recently_read()
-        if not recently_read:
-            self.show_info("提示", "没有最近的阅读记录")
-            return
-
-        # 打开最近阅读的第一本书
-        book_id = recently_read[0]['id']
-        self.controller.open_novel(book_id)
-
-    def show_recently_read(self):
-        """显示最近阅读的书籍列表"""
-        if not self.controller:
-            return
-
-        recently_read = self.controller.get_recently_read()
-        if not recently_read:
-            self.show_info("提示", "没有最近的阅读记录")
-            return
-
-        # 创建新窗口显示最近阅读列表
-        recent_window = tk.Toplevel(self.root)
-        recent_window.title("最近阅读")
-        recent_window.geometry("500x300")
-
-        # 创建列表
-        frame = ttk.Frame(recent_window)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        tree = ttk.Treeview(frame, columns=("title", "author", "last_read"), show="headings")
-        tree.heading("title", text="书名")
-        tree.heading("author", text="作者")
-        tree.heading("last_read", text="最后阅读时间")
-
-        tree.column("title", width=200)
-        tree.column("author", width=150)
-        tree.column("last_read", width=150)
-
-        # 添加数据
-        for book in recently_read:
-            tree.insert("", "end", values=(
-                book['title'],
-                book['author'],
-                book['last_read_time']
-            ))
-
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        tree.pack(fill=tk.BOTH, expand=True)
-
-        # 添加打开按钮
-        def open_selected():
-            selected = tree.selection()
-            if not selected:
-                return
-            item = tree.item(selected[0])
-            title = item['values'][0]
-            # 查找对应的book_id
-            for book in recently_read:
-                if book['title'] == title:
-                    self.controller.open_novel(book['id'])
-                    recent_window.destroy()
-                    break
-
-        btn_frame = ttk.Frame(recent_window)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        ttk.Button(btn_frame, text="打开", command=open_selected).pack(side=tk.RIGHT)
-
-    def show_bookmarks(self):
-        """显示收藏列表"""
-        if not self.controller:
-            return
-
-        bookmarks = self.controller.db.get_bookmarked_books()
-        if not bookmarks:
-            self.show_info("提示", "没有已收藏的书籍")  # 修改提示信息
-            return
-
-        # 创建新窗口显示收藏列表
-        bookmark_window = tk.Toplevel(self.root)
-        bookmark_window.title("我的收藏")  # 修改窗口标题
-        bookmark_window.geometry("500x300")
-
-        # 创建列表
-        frame = ttk.Frame(bookmark_window)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        tree = ttk.Treeview(frame, columns=("title", "author", "last_read"), show="headings")
-        tree.heading("title", text="书名")
-        tree.heading("author", text="作者")
-        tree.heading("last_read", text="最后阅读时间")
-
-        tree.column("title", width=200)
-        tree.column("author", width=150)
-        tree.column("last_read", width=150)
-
-        # 添加数据
-        for book in bookmarks:
-            tree.insert("", "end", values=(
-                book['title'],
-                book['author'],
-                book['last_read_time']
-            ))
-
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        tree.pack(fill=tk.BOTH, expand=True)
-
-        # 添加打开按钮
-        def open_selected():
-            selected = tree.selection()
-            if not selected:
-                return
-            item = tree.item(selected[0])
-            title = item['values'][0]
-            # 查找对应的book_id
-            for book in bookmarks:
-                if book['title'] == title:
-                    self.controller.open_novel(book['id'])
-                    bookmark_window.destroy()
-                    break
-
-        btn_frame = ttk.Frame(bookmark_window)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        ttk.Button(btn_frame, text="打开", command=open_selected).pack(side=tk.RIGHT)
 
 
 class SettingsDialog(tk.Toplevel):

@@ -1,3 +1,5 @@
+from lib2to3.pytree import convert
+
 import requests
 from bs4 import BeautifulSoup
 import random
@@ -30,7 +32,7 @@ class SearchEngine:
                 return []
         except Exception as e:
             print(f"搜索出错: {e}")
-            return self.mock_search(source, novel_name)
+            return []
 
 
     def search_qidian(self, novel_name):
@@ -55,14 +57,11 @@ class SearchEngine:
                     if result:
                         results.append(result)
 
-            if not results:
-                return self.mock_search("起点中文网", novel_name)
-
             return results
 
         except requests.RequestException as e:
             print(f"请求起点搜索出错: {e}")
-            return self.mock_search("起点中文网", novel_name)
+            return []
 
     def process_qidian_item(self, item):
         """处理单个起点书籍项（多线程调用）"""
@@ -121,14 +120,15 @@ class SearchEngine:
 
     def search_jjwxc(self, novel_name):
         """搜索晋江文学城"""
-        search_url = f"https://www.jjwxc.net/search.php?keyword={quote(novel_name)}"
+        name = self.convert_chinese_to_gbk_percent(novel_name)
+        search_url = f"https://www.jjwxc.net/search.php?kw={quote(name)}&ord=&t=1"
 
         try:
             response = requests.get(search_url, headers=self.headers, timeout=10)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            book_items = soup.select('.cytable tr')[1:6]  # 跳过表头
-
+            response.encoding = response.apparent_encoding
+            soup = BeautifulSoup(response.text, 'lxml')
+            book_items = soup.find('div', attrs={'id':'search_result'}).find_all('div', attrs={'class' : False, 'style' : False})
             # 使用线程池并行处理每个书籍的详细信息
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = []
@@ -141,27 +141,32 @@ class SearchEngine:
                     if result:
                         results.append(result)
 
-            if not results:
-                return self.mock_search("晋江文学城", novel_name)
-
             return results
 
         except requests.RequestException as e:
             print(f"请求晋江搜索出错: {e}")
-            return self.mock_search("晋江文学城", novel_name)
+            return []
 
     def process_jjwxc_item(self, item):
         """处理单个晋江书籍项（多线程调用）"""
-        try:
-            title_elem = item.select_one('td:nth-child(1) a')
-            title = title_elem.text.strip()
-            author = item.select_one('td:nth-child(2) a').text.strip()
-            status = item.select_one('td:nth-child(3)').text.strip()
-            chapter = item.select_one('td:nth-child(4)').text.strip()
+        title_elem = '未知'
+        title = '未知'
+        author = '未知'
+        status = '未知'
+        chapter = '未知'
 
-            # 获取书籍ID
+        try:
+            title_elem = item.find('h3',class_='title').find('a')
+            title = title_elem.text.strip()
+            author = item.find('div',class_='info').find('span').text.strip()
             book_url = title_elem['href']
             book_id = self.extract_jjwxc_book_id(book_url)
+            chapter_num = self.get_jjwxc_chapter_count(book_url)
+
+            try:
+                status = item.find('div', class_='info').find('font').text.strip()
+            except:
+                status = '连载'
 
             return {
                 "id": f"jjwxc_{book_id}",
@@ -169,7 +174,7 @@ class SearchEngine:
                 "author": author,
                 "source": "晋江文学城",
                 "status": status,
-                "chapters": chapter
+                "chapters": chapter_num
             }
         except Exception as e:
             print(f"处理晋江书籍项出错: {e}")
@@ -185,3 +190,28 @@ class SearchEngine:
             return params.get('novelid', 'unknown')
         except:
             return "unknown"
+
+    def get_jjwxc_chapter_count(self, chapter_url):
+        """获取起点章节数量（多线程调用）"""
+        try:
+            res = requests.get(chapter_url, headers=self.headers, timeout=10)
+            res.encoding = res.apparent_encoding
+            s = BeautifulSoup(res.text, 'lxml')
+            chapter_num = len(s.find_all('tr', attrs={'itemprop': 'chapter'}))
+            return chapter_num
+        except:
+            return "未知"
+
+    def convert_chinese_to_gbk_percent(self,s):
+        result = []
+        for char in s:
+            # 判断是否为汉字（Unicode范围：\u4e00-\u9fff）
+            if '\u4e00' <= char <= '\u9fff':
+                # 转换为GBK编码的字节序列
+                gbk_bytes = char.encode('gbk')
+                # 每个字节格式化为%XX的大写形式
+                for byte in gbk_bytes:
+                    result.append(f"%{byte:02X}")
+            else:
+                result.append(char)
+        return ''.join(result)

@@ -45,7 +45,7 @@ class Downloader:
             elif source == "晋江文学城":
                 return self.download_jjwxc(novel_id, progress_callback)
             else:
-                return self.mock_download(novel_id, progress_callback)
+                return []
         except Exception as e:
             logger.error(f"下载出错: {e}")
             return False
@@ -190,7 +190,7 @@ class Downloader:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(response.text, 'lxml')
 
             # 提取小说标题
             title_tag = soup.find('div', class_='book-info-top').find('h1')
@@ -228,7 +228,7 @@ class Downloader:
             response = self.session.get(catalog_url, timeout=10)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(response.text, 'lxml')
 
             # 查找所有卷
             volumes = soup.find_all('div', class_='catalog-volume')
@@ -269,18 +269,40 @@ class Downloader:
             response = self.session.get(chapter_url, timeout=10)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            # 从novel_id中提取来源
+            source = novel_id.split("_")[0] if "_" in novel_id else "未知"
 
-            # 提取章节内容
-            content_div = soup.find('main')
-            if not content_div:
-                logger.warning(f"未找到章节内容: {chapter_title}")
-                return False
+            # 根据来源选择不同的解析方式
+            if source == "jjwxc":
+                # 晋江文学城
+                response.encoding = response.apparent_encoding
+                soup = BeautifulSoup(response.text, 'lxml')
+                content_div = soup.find('div', attrs={'class': 'novelbody'}).find('div')
+                if not content_div:
+                    logger.warning(f"未找到晋江章节内容: {chapter_title}")
+                    return False
 
-            # 清理内容
-            content = content_div.get_text().strip()
-            content = re.sub(r'\s+', '\n', content)  # 合并多余空白
+                # 清理不需要的元素
+                for div in content_div.find_all('div'):
+                    div.decompose()
 
+                # 提取文本内容
+                content = content_div.get_text().strip()
+                # 移除多余空白和特定提示
+                content = re.sub(r'\s+', '\n', content)
+
+            elif source == 'qidian':
+                # 起点中文网
+                soup = BeautifulSoup(response.text, 'lxml')
+                content_div = soup.find('main')
+                if not content_div:
+                    logger.warning(f"未找到章节内容: {chapter_title}")
+                    return False
+                content = content_div.get_text().strip()
+                content = re.sub(r'\s+', '\n', content)
+
+            else :
+                pass
             # 缓存章节内容
             with self.lock:
                 self.chapter_cache[novel_id][chapter_index] = (chapter_title, content)
@@ -292,24 +314,70 @@ class Downloader:
             return False
 
     def get_jjwxc_novel_info(self, book_id):
-        """获取晋江小说基本信息 - 示例实现"""
-        return {
-            "title": f"晋江小说_{book_id}",
-            "author": "晋江作者",
-            "status": "连载中",
-            "book_id": book_id
-        }
+        try:
+            # 确保book_id是纯数字
+            if not book_id.isdigit():
+                logger.error(f"无效的晋江文学城书籍ID: {book_id}")
+                return None
+            url = f"http://www.jjwxc.net/onebook.php?novelid={book_id}/"
+            logger.info(f"获取晋江文学城小说信息: {url}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            response.encoding = response.apparent_encoding
+            soup = BeautifulSoup(response.text, 'lxml')
+            # 提取小说标题
+            title_tag = soup.find('span', attrs={'itemprop': 'articleSection'})
+            title = title_tag.get_text(strip=True) if title_tag else f"晋江文学城小说_{book_id}"
+
+            # 提取作者
+            author_tag = soup.find('td', attrs={'colspan': '6'}).find('a', attrs={'href': True})
+            author = author_tag.get_text(strip=True) if author_tag else "未知作者"
+
+            # 提取状态
+            status_tag = soup.find('div', attrs={'class': 'righttd'}).find('span', attrs={'style': 'color:#000;float:none','itemprop': 'updataStatus'})
+            status = status_tag.get_text(strip=True) if status_tag else "状态未知"
+
+            return {
+                "title": title,
+                "author": author,
+                "status": status,
+                "book_id": book_id
+            }
+        except Exception as e:
+            logger.error(f"获取晋江文学城小说信息失败: {e}")
+            return None
 
     def get_jjwxc_chapters(self, book_id):
-        """获取晋江小说章节列表 - 示例实现"""
-        return [("第一章", "https://www.jjwxc.net/onebook.php?novelid=123456&chapterid=1")]
+        """获取晋江小说章节列表 """
+        try:
+            # 确保book_id是纯数字
+            if not book_id.isdigit():
+                logger.error(f"无效的晋江文学城书籍ID: {book_id}")
+                return None
+            url = f"http://www.jjwxc.net/onebook.php?novelid={book_id}/"
+            logger.info(f"获取晋江文学城小说信息: {url}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            response.encoding = response.apparent_encoding
+            soup = BeautifulSoup(response.text, 'lxml')
 
-    def mock_download(self, novel_id, progress_callback):
-        """模拟下载 - 用于测试"""
-        logger.info(f"模拟下载: {novel_id}")
-        total = 100
-        for i in range(total):
-            time.sleep(0.05)
-            progress = int((i + 1) / total * 100)
-            progress_callback(novel_id, progress)
-        return True
+            # 查找所有卷
+            chapters = soup.find_all('tr', attrs={'itemprop': 'chapter'})
+            free_chapters = []
+
+            for chapter in chapters:
+                # 检查是否是免费章
+                if chapter.find('div', attrs={'style': 'float:left'}).get_text().find('VIP') == 1:
+                    continue
+
+                link = chapter.find('a',attrs={'itemprop': 'url'})
+                if link and link.get('href'):
+                    chapter_title = link.get_text(strip=True)
+                    chapter_url = urljoin("https:", link['href'])
+                    free_chapters.append((chapter_title, chapter_url))
+
+            logger.info(f"找到 {len(free_chapters)} 个免费章节")
+            return free_chapters
+        except Exception as e:
+            logger.error(f"获取晋江文学城章节列表失败: {e}")
+            return None
