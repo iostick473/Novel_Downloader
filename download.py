@@ -372,7 +372,7 @@ class Downloader:
 
                 link = chapter.find('a',attrs={'itemprop': 'url'})
                 if link and link.get('href'):
-                    chapter_title = link.get_text(strip=True)
+                    chapter_title = link.get_text(strip=True)+" "+chapter.find_all('td')[2].get_text(strip=True)
                     chapter_url = urljoin("https:", link['href'])
                     free_chapters.append((chapter_title, chapter_url))
 

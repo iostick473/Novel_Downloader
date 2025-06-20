@@ -103,7 +103,7 @@ class LibraryBrowser:
         self.read_btn.pack(side=tk.LEFT, padx=5)
 
         # 删除按钮
-        ttk.Button(btn_frame, text="删除", command=self.delete_book).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="删除", command=self.show_delete_options).pack(side=tk.LEFT, padx=5)
 
         # 收藏按钮
         self.bookmark_btn = ttk.Button(btn_frame, text="收藏小说", command=self.toggle_bookmark)
@@ -301,27 +301,94 @@ class LibraryBrowser:
         from reader import NovelReader
         NovelReader(reader_window, self.db, book_id, file_path)
 
-    def delete_book(self):
-        """删除选中的书籍"""
+    def show_delete_options(self):
+        """显示删除选项对话框"""
         selected = self.book_tree.selection()
         if not selected:
             return
 
         item = self.book_tree.item(selected[0])
         values = item['values']
-        book_id = values[0]
-        title = values[1]
+        self.selected_book_id = values[0]
+        self.selected_title = values[1]
 
-        # 确认删除
-        if not messagebox.askyesno("确认删除", f"确定要删除《{title}》吗？\n此操作将删除数据库记录，但不会删除文件。", parent=self.root):
+        # 创建选项对话框
+        option_dialog = tk.Toplevel(self.root)
+        option_dialog.title("删除选项")
+        option_dialog.geometry("300x150")
+        option_dialog.transient(self.root)
+        option_dialog.grab_set()
+
+        # 添加标签
+        label = ttk.Label(option_dialog, text=f"请选择删除《{self.selected_title}》的方式：")
+        label.pack(pady=10)
+
+        # 按钮框架
+        btn_frame = ttk.Frame(option_dialog)
+        btn_frame.pack(pady=10)
+
+        # 三个选项按钮
+        ttk.Button(
+            btn_frame,
+            text="仅删除文件",
+            command=lambda: self.delete_book(option_dialog, delete_file=True, delete_db=False)
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            btn_frame,
+            text="仅删除数据库数据",
+            command=lambda: self.delete_book(option_dialog, delete_file=False, delete_db=True)
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            btn_frame,
+            text="同时删除",
+            command=lambda: self.delete_book(option_dialog, delete_file=True, delete_db=True)
+        ).pack(side=tk.LEFT, padx=5)
+
+    def delete_book(self, dialog, delete_file=False, delete_db=False):
+        """根据选项删除书籍"""
+        if not delete_file and not delete_db:
+            dialog.destroy()
             return
 
-        # 从数据库中删除
-        self.db.delete_book(book_id)
+        # 获取下载记录
+        downloads = self.db.get_book_downloads(self.selected_book_id)
+        file_path = downloads[0]['file_path'] if downloads else None
 
-        # 重新加载书籍列表
+        # 删除文件
+        if delete_file and file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                file_deleted = True
+            except Exception as e:
+                messagebox.showerror("错误", f"文件删除失败: {str(e)}", parent=dialog)
+                file_deleted = False
+        else:
+            file_deleted = False
+
+        # 删除数据库数据
+        if delete_db:
+            self.db.delete_book(self.selected_book_id)
+            db_deleted = True
+        else:
+            db_deleted = False
+
+        # 显示结果消息
+        messages = []
+        if file_deleted:
+            messages.append("文件已删除")
+        if db_deleted:
+            messages.append("数据库数据已删除")
+
+        if messages:
+            messagebox.showinfo("成功", f"《{self.selected_title}》" + "，".join(messages), parent=dialog)
+        else:
+            messagebox.showwarning("警告", "未执行任何删除操作", parent=dialog)
+
+        # 关闭对话框并刷新列表
+        dialog.destroy()
         self.load_books()
-        messagebox.showinfo("成功", f"《{title}》已从数据库中删除", parent=self.root)
 
     def toggle_bookmark(self):
         """切换收藏状态"""
