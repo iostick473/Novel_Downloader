@@ -17,16 +17,28 @@ class LibraryBrowser:
         toolbar = ttk.Frame(main_frame)
         toolbar.pack(fill=tk.X, pady=(0, 10))
 
+        # 搜索选项
+        ttk.Label(toolbar, text="搜索范围:").pack(side=tk.LEFT, padx=(0, 5))
+        self.search_type = tk.StringVar(value="书名")  # 修复：初始值设为"书名"
+        search_combo = ttk.Combobox(
+            toolbar,
+            textvariable=self.search_type,
+            values=["书名", "作者", "全部"],
+            width=8,
+            state="readonly"
+        )
+        search_combo.pack(side=tk.LEFT, padx=5)
+
         # 搜索框
         ttk.Label(toolbar, text="搜索:").pack(side=tk.LEFT, padx=(0, 5))
         self.search_entry = ttk.Entry(toolbar, width=40)
         self.search_entry.pack(side=tk.LEFT, padx=5)
-        self.search_entry.bind("<Return>", self.search_books)
+        self.search_entry.bind("<KeyRelease>", self.on_search_keyrelease)
 
-        # 搜索按钮
-        ttk.Button(toolbar, text="搜索", command=self.search_books).pack(side=tk.LEFT, padx=5)
+        # 清除搜索按钮
+        ttk.Button(toolbar, text="清除", command=self.clear_search).pack(side=tk.LEFT, padx=5)
 
-        # 分类筛选
+        # 分类筛选（保留：已下载、收藏、最近阅读）
         ttk.Label(toolbar, text="分类:").pack(side=tk.LEFT, padx=(20, 5))
         self.category_var = tk.StringVar()
         self.category_combo = ttk.Combobox(
@@ -36,6 +48,7 @@ class LibraryBrowser:
             state="readonly"
         )
         self.category_combo.pack(side=tk.LEFT, padx=5)
+        self.category_combo.bind("<<ComboboxSelected>>", self.on_category_selected)
 
         # 刷新按钮
         ttk.Button(toolbar, text="刷新", command=self.load_books).pack(side=tk.RIGHT, padx=5)
@@ -93,7 +106,8 @@ class LibraryBrowser:
         ttk.Button(btn_frame, text="删除", command=self.delete_book).pack(side=tk.LEFT, padx=5)
 
         # 收藏按钮
-        ttk.Button(btn_frame, text="收藏小说", command=self.toggle_bookmark).pack(side=tk.LEFT, padx=5)
+        self.bookmark_btn = ttk.Button(btn_frame, text="收藏小说", command=self.toggle_bookmark)
+        self.bookmark_btn.pack(side=tk.LEFT, padx=5)
 
         # 查看详情按钮
         ttk.Button(btn_frame, text="查看详情", command=self.show_book_details).pack(side=tk.LEFT, padx=5)
@@ -101,16 +115,18 @@ class LibraryBrowser:
         # 绑定选择事件
         self.book_tree.bind("<<TreeviewSelect>>", self.on_book_select)
 
-        # 加载书籍和分类
+        # 加载分类和书籍
         self.load_categories()
         self.load_books()
 
     def load_categories(self):
-        """加载分类列表"""
-        categories = self.db.get_categories()
-        category_names = [cat['name'] for cat in categories]
-        self.category_combo['values'] = ["全部"] + category_names
+        """加载分类列表（只保留：已下载、收藏、最近阅读）"""
+        self.category_combo['values'] = ["全部", "已下载", "收藏", "最近阅读"]
         self.category_combo.current(0)
+
+    def on_category_selected(self, event=None):
+        """当选择分类时重新加载书籍"""
+        self.load_books()
 
     def load_books(self):
         """加载书籍列表"""
@@ -121,9 +137,14 @@ class LibraryBrowser:
         # 获取当前选择的分类
         selected_category = self.category_var.get()
 
-        if selected_category and selected_category != "全部":
-            books = self.db.get_books_in_category(selected_category)
-        else:
+        # 根据分类获取书籍
+        if selected_category == "已下载":
+            books = self.db.get_books_in_category("已下载")
+        elif selected_category == "收藏":
+            books = self.db.get_bookmarked_books()
+        elif selected_category == "最近阅读":
+            books = self.db.get_recently_read_books()
+        else:  # 全部
             books = self.db.get_all_books()
 
         # 添加书籍到列表
@@ -162,14 +183,29 @@ class LibraryBrowser:
                 progress_text
             ))
 
-    def search_books(self, event=None):
+    def on_search_keyrelease(self, event):
+        """实时搜索处理"""
+        self.search_books()
+
+    def clear_search(self):
+        """清除搜索条件"""
+        self.search_entry.delete(0, tk.END)
+        self.load_books()
+
+    def search_books(self):
         """搜索书籍"""
         keyword = self.search_entry.get().strip()
         if not keyword:
             self.load_books()
             return
 
-        books = self.db.search_books(keyword)
+        search_type = self.search_type.get()
+        if search_type == "书名":
+            books = self.db.search_books_by_title(keyword)
+        elif search_type == "作者":
+            books = self.db.search_books_by_author(keyword)
+        else:  # 全部
+            books = self.db.search_books(keyword)
 
         # 清空现有书籍
         for item in self.book_tree.get_children():
@@ -217,8 +253,19 @@ class LibraryBrowser:
         selected = self.book_tree.selection()
         if selected:
             self.read_btn.config(state="normal")
+            item = self.book_tree.item(selected[0])
+            values = item['values']
+            book_id = values[0]  # 第一列是ID
+
+            bookmarked = self.db.get_reading_progress(book_id).get('bookmarked')
+
+            if bookmarked:
+                self.bookmark_btn.config(text="取消收藏")
+            else:
+                self.bookmark_btn.config(text="收藏小说")
         else:
             self.read_btn.config(state="disabled")
+            self.bookmark_btn.config(text="收藏小说")  # 无选中时恢复默认文本
 
     def open_reader(self):
         """打开阅读器"""
@@ -292,11 +339,13 @@ class LibraryBrowser:
         # 重新加载书籍列表
         self.load_books()
 
-        # 获取当前收藏状态
-        book_categories = self.db.get_book_categories(book_id)
-        if "收藏" in book_categories:
+        bookmarked = self.db.get_reading_progress(book_id).get('bookmarked')
+
+        if bookmarked:
+            self.bookmark_btn.config(text="取消收藏")
             messagebox.showinfo("成功", f"已收藏《{title}》")
         else:
+            self.bookmark_btn.config(text="收藏小说")
             messagebox.showinfo("成功", f"已取消收藏《{title}》")
 
     def show_book_details(self):

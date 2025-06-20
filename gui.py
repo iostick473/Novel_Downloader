@@ -121,9 +121,6 @@ class NovelDownloaderApp:
         # 创建菜单
         self.create_menu()
 
-        # 添加示例数据
-        self.add_sample_data()
-
     def set_controller(self, controller):
         """设置控制器实例"""
         self.controller = controller
@@ -178,7 +175,7 @@ class NovelDownloaderApp:
                     self.show_info("打开目录", f"下载目录: {os.path.abspath(download_dir)}")
 
     def show_about(self):
-        messagebox.showinfo("关于小说下载器", "版本: 2.1\n使用小说编号作为唯一标识")
+        messagebox.showinfo("关于小说下载器", "版本: 1.14\n使用小说编号作为唯一标识")
 
     def get_selected_item(self):
         selected = self.result_tree.selection()
@@ -258,19 +255,6 @@ class NovelDownloaderApp:
 
     def show_info(self, title, message):
         messagebox.showinfo(title, message)
-
-    def add_sample_data(self):
-        sample_data = [
-            ("qidian_1021617576", "诡秘之主", "爱潜水的乌贼", "起点中文网", "已完结", "1434章"),
-            ("qidian_107580", "斗破苍穹", "天蚕土豆", "起点中文网", "已完结", "1623章"),
-            ("jjwxc_3663542", "镇魂", "Priest", "晋江文学城", "已完结", "112章"),
-            ("jjwxc_3458185", "魔道祖师", "墨香铜臭", "晋江文学城", "已完结", "126章"),
-        ]
-
-        for data in sample_data:
-            self.result_tree.insert("", "end", values=data)
-
-        self.log("已加载示例数据，可以尝试搜索或直接下载")
 
     def continue_reading(self):
         """继续上次阅读"""

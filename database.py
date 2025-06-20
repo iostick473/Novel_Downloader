@@ -68,7 +68,7 @@ class NovelDatabase:
                     '''CREATE TABLE IF NOT EXISTS reading_progress (
                         book_id TEXT PRIMARY KEY, current_chapter INTEGER DEFAULT 1,
                         chapter_position REAL DEFAULT 0, last_read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        bookmarked BOOLEAN DEFAULT 0, notes TEXT,
+                        bookmarked BOOLEAN DEFAULT 0,
                         FOREIGN KEY (book_id) REFERENCES books(id))''',
                     '''CREATE TABLE IF NOT EXISTS categories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,9 +92,7 @@ class NovelDatabase:
 
                 # 创建默认分类
                 for name, color in [
-                    ("已下载", "#4CAF50"), ("收藏", "#FFC107"),
-                    ("待读", "#2196F3"), ("已读", "#9C27B0"),
-                    ("连载中", "#F44336"), ("最近阅读", "#FF5722")
+                    ("已下载", "#4CAF50"), ("收藏", "#FFC107"), ("最近阅读", "#FF5722")
                 ]:
                     cursor.execute(
                         "INSERT OR IGNORE INTO categories (name, color) VALUES (?, ?)",
@@ -229,16 +227,16 @@ class NovelDatabase:
             with self.lock:
                 self._execute_with_retry(operation)
 
-    def save_reading_progress(self, book_id, current_chapter, chapter_position, bookmarked=False, notes=''):
-        """保存阅读进度"""
+    def save_reading_progress(self, book_id, current_chapter, chapter_position, bookmarked=False):
+        """保存阅读进度 - 删除notes参数"""
 
         def operation(cursor, conn):
             now = datetime.now().isoformat()
             cursor.execute('''
                 INSERT OR REPLACE INTO reading_progress 
-                (book_id, current_chapter, chapter_position, last_read_time, bookmarked, notes)
-                VALUES (?, ?, ?, ?, ?, ?)''', (
-                book_id, current_chapter, chapter_position, now, bookmarked, notes
+                (book_id, current_chapter, chapter_position, last_read_time, bookmarked)
+                VALUES (?, ?, ?, ?, ?)''', (
+                book_id, current_chapter, chapter_position, now, bookmarked
             ))
             conn.commit()
             self._add_book_to_category(book_id, "最近阅读", cursor)
@@ -346,12 +344,12 @@ class NovelDatabase:
             return False
 
     def get_reading_progress(self, book_id):
-        """获取阅读进度"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM reading_progress WHERE book_id = ?", (book_id,))
-            return dict(cursor.fetchone()) if (row := cursor.fetchone()) else None
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def add_reading_history(self, book_id, duration, chapters_read):
         """添加阅读历史记录"""
@@ -435,19 +433,20 @@ class NovelDatabase:
                 )
             conn.commit()
 
+    def search_books_by_title(self, keyword):
+        """按书名搜索书籍"""
+        return self._query_books("SELECT * FROM books WHERE title LIKE ?", ('%' + keyword + '%',))
+
+    def search_books_by_author(self, keyword):
+        """按作者搜索书籍"""
+        return self._query_books("SELECT * FROM books WHERE author LIKE ?", ('%' + keyword + '%',))
+
     def search_books(self, keyword):
-        """搜索书籍"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT b.* 
-                FROM books b
-                JOIN books_fts fts ON b.rowid = fts.rowid
-                WHERE books_fts MATCH ?
-                ORDER BY rank
-            """, (f'"{keyword}"',))
-            return [self._row_to_book(dict(row)) for row in cursor.fetchall()]
+        """全文搜索书籍（书名和作者）"""
+        return self._query_books("""
+            SELECT * FROM books 
+            WHERE title LIKE ? OR author LIKE ?
+        """, ('%' + keyword + '%', '%' + keyword + '%'))
 
     def get_recent_searches(self, limit=10):
         """获取最近搜索的书籍"""
@@ -521,8 +520,7 @@ class NovelDatabase:
                         "title": book['title'],
                         "current_chapter": progress['current_chapter'],
                         "chapter_position": progress['chapter_position'],
-                        "last_read_time": progress['last_read_time'],
-                        "notes": progress.get('notes', '')
+                        "last_read_time": progress['last_read_time']
                     })
 
                 if history := self.get_reading_history(book['id']):
