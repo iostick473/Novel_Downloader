@@ -83,6 +83,16 @@ class NovelDatabase:
                         read_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, duration REAL NOT NULL,
                         current_chapter INTEGER NOT NULL, chapters_read INTEGER,
                         FOREIGN KEY (book_id) REFERENCES books(id))''',
+                    '''CREATE TABLE IF NOT EXISTS reading_settings (
+                                book_id TEXT PRIMARY KEY,
+                                font_family TEXT DEFAULT "宋体",
+                                font_size INTEGER DEFAULT 14,
+                                bg_color TEXT DEFAULT "#F8F8F8",
+                                fg_color TEXT DEFAULT "#333333",
+                                line_spacing INTEGER DEFAULT 5,
+                                night_mode BOOLEAN DEFAULT 0,
+                                FOREIGN KEY (book_id) REFERENCES books(id)
+                            )''',
                     '''CREATE VIRTUAL TABLE IF NOT EXISTS books_fts 
                        USING fts5(id, title, author, content='books', content_rowid='rowid')'''
                 ]
@@ -198,6 +208,37 @@ class NovelDatabase:
             conn.commit()
 
         self._execute_with_retry(operation)
+
+    def save_reading_settings(self, book_id, settings):
+        """保存阅读设置"""
+
+        def operation(cursor, conn):
+            cursor.execute('''
+                INSERT OR REPLACE INTO reading_settings 
+                (book_id, font_family, font_size, bg_color, fg_color, line_spacing, night_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                book_id,
+                settings.get('font_family', '宋体'),
+                settings.get('font_size', 14),
+                settings.get('bg_color', '#F8F8F8'),
+                settings.get('fg_color', '#333333'),
+                settings.get('line_spacing', 5),
+                int(settings.get('night_mode', False))
+            ))
+            conn.commit()
+
+        self._execute_with_retry(operation)
+
+    def get_reading_settings(self, book_id):
+        """获取阅读设置"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM reading_settings WHERE book_id = ?", (book_id,))
+            if row := cursor.fetchone():
+                return dict(row)
+            return None
 
     def _add_book_to_category(self, book_id, category_name, cursor=None):
         """内部方法 - 将书籍添加到分类"""

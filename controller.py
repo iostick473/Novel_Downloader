@@ -22,6 +22,8 @@ class Controller:
 
         # 设置控制器引用到GUI
         self.gui.set_controller(self)
+        # 绑定收藏按钮事件
+        self.gui.favorite_button.config(command=self.toggle_favorite)
 
     def _extract_novel_title(self, novel_id):
         """提取小说标题的通用方法"""
@@ -152,9 +154,41 @@ class Controller:
         """记录阅读会话"""
         self.db.add_reading_history(book_id, duration, chapters_read)
 
-    def toggle_bookmark(self, book_id):
-        """切换书签状态"""
-        return self.db.toggle_bookmark(book_id)
+    def toggle_favorite(self):
+        """切换收藏状态 - 如果小说不存在则先创建"""
+        selected = self.gui.get_selected_item()
+        if not selected:
+            self.gui.show_info("提示", "请先选择要收藏的小说")
+            return
+
+        # 从搜索结果中提取小说信息
+        book_info = {
+            "id": selected[0],
+            "title": selected[1],
+            "author": selected[2],
+            "source": selected[3],
+            "status": selected[4],
+            "chapters": selected[5]
+        }
+        book_id = book_info["id"]
+        book_title = self._extract_novel_title(book_id)
+
+        # 检查小说是否已在数据库中
+        if not self.db.get_book(book_id):
+            # 如果不存在，先保存小说信息
+            self.db.save_book(book_info)
+            self.gui.log(f"新增小说到数据库: {book_title}")
+
+        # 切换收藏状态
+        new_status = self.db.toggle_bookmark(book_id)
+
+        if new_status == 1:
+            pass
+        else:
+            self.db.toggle_bookmark(book_id)
+
+        self.gui.log(f"已收藏: {book_title}")
+        self.gui.show_info("收藏成功", f"小说《{book_title}》已加入收藏")
 
     def get_recently_read(self):
         """获取最近阅读的书籍"""

@@ -21,7 +21,6 @@ class NovelReader:
         self.bookmarked = False  # 收藏状态
         self.reading_progress = None  # 阅读进度
         self.reading_start_time = datetime.now()  # 开始阅读时间
-        self.night_mode = False  # 夜间模式
         self.chapter_positions = {}  # 章节起始位置标记
         self.total_lines = 0
         self.last_progress_update = datetime.now()
@@ -38,8 +37,17 @@ class NovelReader:
         # 加载阅读进度
         self.load_reading_progress()
 
-        # 创建界面
+        # 加载阅读设置
+        self.settings = self.load_reading_settings()
+
+        # 关键：用加载的设置初始化夜间模式
+        self.night_mode = self.settings['night_mode']
+
+        # 先创建界面组件
         self.create_widgets()
+
+        # 然后应用设置
+        self.apply_settings()
 
         # 解析小说内容
         self.chapters = self.parse_novel_content()
@@ -288,17 +296,43 @@ class NovelReader:
             return [{"title": "错误", "content": f"无法解析小说内容: {str(e)}"}]
 
     def toggle_night_mode(self):
-        """切换夜间模式"""
-        if self.night_mode:
-            # 切换到日间模式
-            self.text_area.config(bg="#F8F8F8", fg="#333333")
-            self.night_mode = False
-            self.night_mode_btn.config(text="夜间模式")
-        else:
-            # 切换到夜间模式
-            self.text_area.config(bg="#1E1E1E", fg="#E0E0E0")
-            self.night_mode = True
-            self.night_mode_btn.config(text="日间模式")
+        self.night_mode = not self.night_mode
+        self.night_mode_btn.config(text="日间模式" if self.night_mode else "夜间模式")
+
+        # 立即应用新设置
+        self.apply_settings()
+
+        # 显式保存设置
+        self.db.save_reading_settings(self.book_id, {
+            **self.settings,
+            'night_mode': self.night_mode
+        })
+
+    def load_reading_settings(self):
+        default_settings = {
+            'font_family': '宋体',
+            'font_size': 14,
+            'bg_color': '#F8F8F8',
+            'fg_color': '#333333',
+            'line_spacing': 5,
+            'night_mode': False
+        }
+
+        db_settings = self.db.get_reading_settings(self.book_id) or {}
+        # 合并默认值和数据库设置
+        return {**default_settings, **db_settings}
+
+    def save_reading_settings(self):
+        """保存当前设置到数据库"""
+        settings = {
+            'font_family': self.settings['font_family'],
+            'font_size': self.settings['font_size'],
+            'bg_color': self.settings['bg_color'],
+            'fg_color': self.settings['fg_color'],
+            'line_spacing': self.settings['line_spacing'],
+            'night_mode': self.night_mode
+        }
+        self.db.save_reading_settings(self.book_id, settings)
 
     def open_settings(self):
         """打开阅读设置对话框"""
@@ -307,12 +341,15 @@ class NovelReader:
         settings_dialog.transient(self.root)
         settings_dialog.grab_set()
 
+        # 从数据库加载当前设置
+        settings = self.db.get_reading_settings(self.book_id) or {}
+
         # 字体设置
         font_frame = ttk.LabelFrame(settings_dialog, text="字体设置")
         font_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Label(font_frame, text="字体:").grid(row=0, column=0, padx=5, pady=5)
-        self.font_family = tk.StringVar(value=self.text_area.cget("font").split()[0])
+        self.font_family = tk.StringVar(value=settings.get('font_family', '宋体'))
         font_families = list(font.families())
         font_families.sort()
 
@@ -320,7 +357,7 @@ class NovelReader:
         font_combo.grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Label(font_frame, text="大小:").grid(row=0, column=2, padx=5, pady=5)
-        self.font_size = tk.IntVar(value=int(self.text_area.cget("font").split()[1]))
+        self.font_size = tk.IntVar(value=settings.get('font_size', 14))
         size_spin = ttk.Spinbox(font_frame, from_=8, to=36, textvariable=self.font_size, width=5)
         size_spin.grid(row=0, column=3, padx=5, pady=5)
 
@@ -329,14 +366,14 @@ class NovelReader:
         color_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Label(color_frame, text="背景:").grid(row=0, column=0, padx=5, pady=5)
-        self.bg_color = tk.StringVar(value=self.text_area.cget("bg"))
+        self.bg_color = tk.StringVar(value=settings.get('bg_color', '#F8F8F8'))
         bg_entry = ttk.Entry(color_frame, textvariable=self.bg_color, width=10)
         bg_entry.grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(color_frame, text="选择", command=lambda: self.choose_color(self.bg_color)).grid(row=0, column=2,
                                                                                                     padx=5, pady=5)
 
         ttk.Label(color_frame, text="文字:").grid(row=1, column=0, padx=5, pady=5)
-        self.fg_color = tk.StringVar(value=self.text_area.cget("fg"))
+        self.fg_color = tk.StringVar(value=settings.get('fg_color', '#333333'))
         fg_entry = ttk.Entry(color_frame, textvariable=self.fg_color, width=10)
         fg_entry.grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(color_frame, text="选择", command=lambda: self.choose_color(self.fg_color)).grid(row=1, column=2,
@@ -346,7 +383,7 @@ class NovelReader:
         spacing_frame = ttk.LabelFrame(settings_dialog, text="行距设置")
         spacing_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        self.line_spacing = tk.IntVar(value=5)
+        self.line_spacing = tk.IntVar(value=settings.get('line_spacing', 5))
         ttk.Scale(
             spacing_frame,
             from_=0,
@@ -360,11 +397,49 @@ class NovelReader:
         btn_frame = ttk.Frame(settings_dialog)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        ttk.Button(btn_frame, text="应用", command=self.apply_settings).pack(side=tk.RIGHT, padx=5)
+        # 修改应用按钮命令，传递设置对话框引用
+        ttk.Button(btn_frame, text="应用", command=lambda: self.apply_settings(settings_dialog)).pack(side=tk.RIGHT,
+                                                                                                      padx=5)
         ttk.Button(btn_frame, text="取消", command=settings_dialog.destroy).pack(side=tk.RIGHT, padx=5)
 
-        # 初始化设置
-        self.apply_settings()
+    def apply_settings(self, settings_dialog=None):
+        # 确保使用最新设置
+        current_settings = self.settings.copy()
+
+        if settings_dialog:
+            # 从对话框获取新设置
+            new_settings = {
+                'font_family': self.font_family.get(),
+                'font_size': self.font_size.get(),
+                'bg_color': self.bg_color.get(),
+                'fg_color': self.fg_color.get(),
+                'line_spacing': self.line_spacing.get()
+            }
+            # 更新实例设置
+            self.settings = {**current_settings, **new_settings}
+
+        # 应用颜色（优先使用夜间模式）
+        bg_color = self.settings['bg_color']
+        fg_color = self.settings['fg_color']
+        if self.night_mode:
+            bg_color = "#1E1E1E"
+            fg_color = "#E0E0E0"
+
+        # 应用所有设置
+        self.text_area.config(
+            font=(self.settings['font_family'], self.settings['font_size']),
+            bg=bg_color,
+            fg=fg_color,
+            spacing1=self.settings['line_spacing'],
+            spacing2=self.settings['line_spacing'],
+            spacing3=self.settings['line_spacing']
+        )
+
+        # 保存到数据库（包含夜间模式状态）
+        self.db.save_reading_settings(self.book_id, {
+            **self.settings,
+            'night_mode': self.night_mode  # 确保包含当前状态
+        })
 
     def choose_color(self, color_var):
         """选择颜色"""
@@ -372,32 +447,19 @@ class NovelReader:
         if color[1]:
             color_var.set(color[1])
 
-    def apply_settings(self):
-        """应用阅读设置"""
-        # 更新字体
-        font_spec = (self.font_family.get(), self.font_size.get())
-        self.text_area.config(font=font_spec)
-
-        # 更新颜色
-        self.text_area.config(bg=self.bg_color.get(), fg=self.fg_color.get())
-
-        # 应用行距
-        self.apply_line_spacing()
-
     def apply_line_spacing(self, event=None):
         """应用行间距设置"""
         spacing = self.line_spacing.get()
         self.text_area.config(spacing1=spacing, spacing2=spacing, spacing3=spacing)
 
     def on_close(self):
-        """窗口关闭事件处理"""
-        # 保存当前位置 - 使用同步方式确保在关闭前保存
-        if hasattr(self, 'chapters') and self.chapters:
-            # 保存当前阅读位置
-            self.save_current_position(sync=True)
-
-            # 关闭窗口
-        self.root.destroy()
+        try:
+            if hasattr(self, 'chapters') and self.chapters:
+                self.save_current_position(sync=True)
+            # 确保设置保存
+            self.save_reading_settings()
+        finally:
+            self.root.destroy()
 
     def on_scroll(self, event=None):
         """处理滚动事件，更新当前章节索引并记录位置"""

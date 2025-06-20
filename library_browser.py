@@ -1,13 +1,16 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from database import NovelDatabase
+import threading
 import os
 
 
 class LibraryBrowser:
-    def __init__(self, root, db):
+    def __init__(self, root, db, downloader):  # 添加downloader参数
         self.root = root
         self.db = db
+        self.downloader = downloader  # 保存下载器实例
+        self.download_in_progress = {}  # 跟踪下载状态 {book_id: progress}
 
         # 创建主框架
         main_frame = ttk.Frame(root, padding="10")
@@ -112,6 +115,10 @@ class LibraryBrowser:
         # 查看详情按钮
         ttk.Button(btn_frame, text="查看详情", command=self.show_book_details).pack(side=tk.LEFT, padx=5)
 
+        # 添加下载按钮
+        self.download_btn = ttk.Button(btn_frame, text="下载小说", command=self.download_novel)
+        self.download_btn.pack(side=tk.LEFT, padx=5)
+
         # 绑定选择事件
         self.book_tree.bind("<<TreeviewSelect>>", self.on_book_select)
 
@@ -119,10 +126,106 @@ class LibraryBrowser:
         self.load_categories()
         self.load_books()
 
+        # 启动进度更新线程
+        self.update_progress_thread()
+
+    def download_novel(self):
+        """下载选中的小说"""
+        selected = self.book_tree.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要下载的小说", parent=self.root)
+            return
+
+        item = self.book_tree.item(selected[0])
+        values = item['values']
+        book_id = values[0]
+        title = values[1]
+        source = values[3]  # 来源信息
+
+        # 检查是否已在下载中
+        if book_id in self.download_in_progress:
+            messagebox.showinfo("提示", f"《{title}》正在下载中，请勿重复操作", parent=self.root)
+            return
+
+        # 确认下载
+        if not messagebox.askyesno("确认", f"确定要下载《{title}》吗？", parent=self.root):
+            return
+
+        # 标记为下载中
+        self.download_in_progress[book_id] = 0
+
+        # 在单独的线程中执行下载
+        threading.Thread(
+            target=self._download_thread,
+            args=(book_id, source, title),
+            daemon=True
+        ).start()
+
+    def _download_thread(self, book_id, source, title):
+        """下载线程"""
+        try:
+            # 进度回调函数
+            def progress_callback(n_id, progress):
+                if n_id == book_id:
+                    self.download_in_progress[book_id] = progress
+
+            # 执行下载
+            success = self.downloader.download(book_id, source, progress_callback)
+
+            # 下载完成后更新状态
+            if success:
+                # 更新数据库
+                downloads = self.downloader.get_download_info(book_id)
+                if downloads and self.db:
+                    # 修复：传递文件路径字符串而不是字典
+                    self.db.record_download(book_id, downloads[0]['file_path'])
+
+                # 刷新列表
+                self.root.after(0, lambda: self.load_books())
+                self.root.after(0, lambda: self.safe_show_info("成功", f"《{title}》下载完成"))
+            else:
+                self.root.after(0, lambda: self.safe_show_error("错误", f"《{title}》下载失败"))
+        except Exception as e:
+            # 使用局部变量捕获异常信息
+            error_msg = str(e)
+            self.root.after(0, lambda: self.safe_show_warning("错误", f"下载出错: {error_msg}"))
+        finally:
+            # 移除下载状态
+            if book_id in self.download_in_progress:
+                del self.download_in_progress[book_id]
+
+    def update_progress_thread(self):
+        """定期更新下载进度显示"""
+        for book_id, progress in self.download_in_progress.items():
+            # 在树状视图中更新进度
+            for item in self.book_tree.get_children():
+                values = self.book_tree.item(item)['values']
+                if values and values[0] == book_id:
+                    # 创建新的值列表，更新进度列
+                    new_values = list(values)
+                    new_values[7] = f"下载中: {progress}%"  # 第8列是进度
+                    self.book_tree.item(item, values=new_values)
+                    break
+
+        # 每500毫秒更新一次
+        self.root.after(500, self.update_progress_thread)
+
     def load_categories(self):
         """加载分类列表（只保留：已下载、收藏、最近阅读）"""
         self.category_combo['values'] = ["全部", "已下载", "收藏", "最近阅读"]
         self.category_combo.current(0)
+
+    def safe_show_info(self, title, message):
+        if self.root.winfo_exists():
+            messagebox.showinfo(title, message, parent=self.root)
+
+    def safe_show_error(self, title, message):
+        if self.root.winfo_exists():
+            messagebox.showerror(title, message, parent=self.root)
+
+    def safe_show_warning(self, title, message):
+        if self.root.winfo_exists():
+            messagebox.showwarning(title, message, parent=self.root)
 
     def on_category_selected(self, event=None):
         """当选择分类时重新加载书籍"""
@@ -141,15 +244,17 @@ class LibraryBrowser:
         if selected_category == "已下载":
             books = self.db.get_books_in_category("已下载")
         elif selected_category == "收藏":
+            # 获取所有收藏书籍（包括未下载的）
             books = self.db.get_bookmarked_books()
         elif selected_category == "最近阅读":
             books = self.db.get_recently_read_books()
         else:  # 全部
+            # 获取所有书籍（包括收藏但未下载的）
             books = self.db.get_all_books()
 
         # 添加书籍到列表
         for book in books:
-            # 获取下载记录
+            # 获取下载记录（未下载的书籍可能没有下载记录）
             downloads = self.db.get_book_downloads(book['id'])
             download_time = ""
             if downloads:
@@ -312,7 +417,6 @@ class LibraryBrowser:
         self.selected_book_id = values[0]
         self.selected_title = values[1]
 
-        # 创建选项对话框
         option_dialog = tk.Toplevel(self.root)
         option_dialog.title("删除选项")
         option_dialog.geometry("300x150")

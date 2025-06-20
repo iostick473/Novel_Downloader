@@ -381,3 +381,12 @@ class Downloader:
         except Exception as e:
             logger.error(f"获取晋江文学城章节列表失败: {e}")
             return None
+
+    def get_download_info(self, novel_id):
+        """获取下载信息"""
+        # 这里返回一个包含文件路径和下载时间的字典列表
+        # 实际实现应根据您的数据库结构进行调整
+        return [{
+            'file_path': os.path.join(self.download_dir, f"{novel_id}.txt"),
+            'download_time': time.strftime("%Y-%m-%d %H:%M:%S")
+        }]

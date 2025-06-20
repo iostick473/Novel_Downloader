@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 from database import NovelDatabase
+from download import Downloader
+from controller import Controller
 from library_browser import LibraryBrowser
 import os
 
@@ -58,6 +60,10 @@ class NovelDownloaderApp:
         # 取消下载按钮
         self.cancel_button = ttk.Button(search_frame, text="取消下载", state="disabled")
         self.cancel_button.grid(row=0, column=4, padx=5)
+
+        # 在搜索区域添加收藏按钮
+        self.favorite_button = ttk.Button(search_frame, text="收藏选中")
+        self.favorite_button.grid(row=0, column=5, padx=5)  # 放在取消按钮后面
 
         # 结果列表区域
         result_frame = ttk.LabelFrame(main_frame, text="搜索结果", padding=(10, 5))
@@ -124,13 +130,15 @@ class NovelDownloaderApp:
     def set_controller(self, controller):
         """设置控制器实例"""
         self.controller = controller
+        # 绑定收藏按钮事件
+        self.favorite_button.config(command=self.controller.toggle_favorite)
 
     def open_library_browser(self):
         """打开图书馆浏览器"""
         library_window = tk.Toplevel(self.root)
         library_window.title("小说图书馆")
         library_window.geometry("1000x700")
-        LibraryBrowser(library_window, self.controller.db)
+        LibraryBrowser(library_window, self.controller.db, self.controller.downloader)
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
