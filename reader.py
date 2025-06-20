@@ -48,7 +48,7 @@ class NovelReader:
         if self.chapters:
             self.display_all_chapters()
         else:
-            messagebox.showerror("错误", "无法加载小说内容")
+            messagebox.showerror("错误", "无法加载小说内容", parent=self.root)
 
         # 设置窗口关闭事件
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -224,7 +224,7 @@ class NovelReader:
         chapters = []
 
         if not os.path.exists(self.file_path):
-            messagebox.showerror("错误", f"文件不存在: {self.file_path}")
+            messagebox.showerror("错误", f"文件不存在: {self.file_path}", parent=self.root)
             return chapters
 
         try:
@@ -283,7 +283,7 @@ class NovelReader:
 
             return chapters
         except Exception as e:
-            messagebox.showerror("解析错误", f"解析小说内容失败: {e}")
+            messagebox.showerror("解析错误", f"解析小说内容失败: {e}", parent=self.root)
             return [{"title": "错误", "content": f"无法解析小说内容: {str(e)}"}]
 
     def toggle_night_mode(self):
@@ -525,7 +525,7 @@ class NovelReader:
         self.db.toggle_bookmark(self.book_id)
         # 显示提示信息
         status = "已收藏" if self.bookmarked else "已取消收藏"
-        messagebox.showinfo("提示", f"{self.book_info['title']} {status}")
+        messagebox.showinfo("提示", f"{self.book_info['title']} {status}", parent=self.root)
 
     def show_chapter_list(self):
         """显示章节列表对话框"""

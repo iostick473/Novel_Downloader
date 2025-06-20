@@ -169,7 +169,7 @@ class LibraryBrowser:
                     progress_text = f"第{current_chapter}章"
 
                 if progress.get('bookmarked'):
-                    progress_text += " 📖"
+                    progress_text += " ⭐"
 
             # 添加书籍到树状视图
             self.book_tree.insert("", "end", values=(
@@ -257,7 +257,8 @@ class LibraryBrowser:
             values = item['values']
             book_id = values[0]  # 第一列是ID
 
-            bookmarked = self.db.get_reading_progress(book_id).get('bookmarked')
+            progress = self.db.get_reading_progress(book_id)
+            bookmarked = progress.get('bookmarked', False) if progress else False
 
             if bookmarked:
                 self.bookmark_btn.config(text="取消收藏")
@@ -280,7 +281,7 @@ class LibraryBrowser:
         # 获取下载记录
         downloads = self.db.get_book_downloads(book_id)
         if not downloads:
-            messagebox.showwarning("错误", "该书没有下载记录")
+            messagebox.showwarning("错误", "该书没有下载记录", parent=self.root)
             return
 
         # 获取文件路径
@@ -288,7 +289,7 @@ class LibraryBrowser:
 
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            messagebox.showwarning("错误", "小说文件不存在")
+            messagebox.showwarning("错误", "小说文件不存在", parent=self.root)
             return
 
         # 创建阅读器窗口
@@ -312,7 +313,7 @@ class LibraryBrowser:
         title = values[1]
 
         # 确认删除
-        if not messagebox.askyesno("确认删除", f"确定要删除《{title}》吗？\n此操作将删除数据库记录，但不会删除文件。"):
+        if not messagebox.askyesno("确认删除", f"确定要删除《{title}》吗？\n此操作将删除数据库记录，但不会删除文件。", parent=self.root):
             return
 
         # 从数据库中删除
@@ -320,7 +321,7 @@ class LibraryBrowser:
 
         # 重新加载书籍列表
         self.load_books()
-        messagebox.showinfo("成功", f"《{title}》已从数据库中删除")
+        messagebox.showinfo("成功", f"《{title}》已从数据库中删除", parent=self.root)
 
     def toggle_bookmark(self):
         """切换收藏状态"""
@@ -339,14 +340,17 @@ class LibraryBrowser:
         # 重新加载书籍列表
         self.load_books()
 
-        bookmarked = self.db.get_reading_progress(book_id).get('bookmarked')
+        progress = self.db.get_reading_progress(book_id)
+        bookmarked = progress.get('bookmarked', False) if progress else False
 
         if bookmarked:
             self.bookmark_btn.config(text="取消收藏")
-            messagebox.showinfo("成功", f"已收藏《{title}》")
+            # 指定父窗口为当前LibraryBrowser窗口
+            messagebox.showinfo("成功", f"已收藏《{title}》", parent=self.root)
         else:
             self.bookmark_btn.config(text="收藏小说")
-            messagebox.showinfo("成功", f"已取消收藏《{title}》")
+            # 指定父窗口为当前LibraryBrowser窗口
+            messagebox.showinfo("成功", f"已取消收藏《{title}》", parent=self.root)
 
     def show_book_details(self):
         """显示书籍详情"""
